@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "SyncTab - Sleek Office Dashboard",
+  "version": "1.0.0",
+  "description": "Collaborative, premium new-tab dashboard for office workers to sync notes, tasks, bookmarks, and chat.",
+  "chrome_url_overrides": {
+    "newtab": "index.html"
+  },
+  "permissions": [
+    "bookmarks"
+  ],
+  "host_permissions": [
+    "http://localhost:3000/*"
+  ]
+}
