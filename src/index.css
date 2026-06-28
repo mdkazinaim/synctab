@@ -1651,7 +1651,12 @@ body {
 
 .widget-profile-btn {
   padding: 0;
-  overflow: hidden;
+  overflow: visible;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  width: auto !important;
+  height: auto !important;
 }
 
 .widget-profile-btn:hover {
@@ -1680,6 +1685,7 @@ body {
   position: absolute;
   bottom: 0px;
   right: 0px;
+  z-index: 2;
 }
 
 .widget-status-dot.active { background-color: var(--color-active); }

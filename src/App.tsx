@@ -22,7 +22,14 @@ import {
   UploadCloud,
   Palette,
   Layout,
-  Image as ImageIcon
+  Image as ImageIcon,
+  User as UserIcon,
+  Shield,
+  Link2,
+  Unlink,
+  KeyRound,
+  Mail,
+  AlertCircle
 } from 'lucide-react';
 
 declare global {
@@ -53,15 +60,28 @@ const unpackError = async (res: Response, defaultMsg = 'An error occurred') => {
   }
 };
 
+// Detects backend "user not found" errors that indicate a stale or invalid session
+const isStaleSessionError = (msg: string) =>
+  /user not found|not found|invalid session/i.test(msg);
+
 interface User {
   id: string;
   name: string;
   email: string | null;
-  avatar: string;
+  avatar: string; // can be a URL (Google photo) or an 'avatar-N' identifier
   status: string;
   accentColor?: string;
   blurIntensity?: string;
   clockFormat24h?: boolean;
+}
+
+interface LinkedGoogleAccount {
+  id: string;
+  googleEmail: string;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+  userId: string;
+  createdAt: string;
 }
 
 interface Note {
@@ -120,6 +140,27 @@ const WALLPAPERS = [
   { id: 'ocean', name: 'Tranquil Ocean', url: 'https://images.unsplash.com/photo-1505118380757-91f5f5632de0?auto=format&fit=crop&w=1920&q=80' },
   { id: 'space', name: 'Nebula Space', url: 'https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?auto=format&fit=crop&w=1920&q=80' }
 ];
+
+// Helper: render avatar – if the value looks like a URL show an <img>, otherwise show a letter circle
+const AvatarDisplay = ({ avatar, name, size = 36, className = '' }: { avatar: string; name: string; size?: number; className?: string }) => {
+  const isUrl = avatar.startsWith('http') || avatar.startsWith('data:');
+  if (isUrl) {
+    return (
+      <img
+        src={avatar}
+        alt={name}
+        referrerPolicy="no-referrer"
+        style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', display: 'block', flexShrink: 0 }}
+        className={className}
+      />
+    );
+  }
+  return (
+    <div className={`avatar-circle ${avatar} ${className}`} style={{ width: size, height: size, fontSize: size * 0.38, flexShrink: 0 }}>
+      {name.charAt(0).toUpperCase()}
+    </div>
+  );
+};
 
 function App() {
   // Navigation & UI state
@@ -362,6 +403,20 @@ function App() {
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Profile editing state
+  const [profileName, setProfileName] = useState('');
+  const [profileEmail, setProfileEmail] = useState('');
+  const [profilePassword, setProfilePassword] = useState('');
+  const [profileConfirmPassword, setProfileConfirmPassword] = useState('');
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileSaveMsg, setProfileSaveMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Linked Google Accounts state
+  const [linkedAccounts, setLinkedAccounts] = useState<LinkedGoogleAccount[]>([]);
+  const [newGoogleEmail, setNewGoogleEmail] = useState('');
+  const [linkingGoogle, setLinkingGoogle] = useState(false);
+  const [linkGoogleMsg, setLinkGoogleMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
@@ -536,10 +591,18 @@ function App() {
       let activeUser: User | null = null;
       if (cached) {
         const cachedUser = JSON.parse(cached) as User;
+        // Always validate against the live DB user list — clears stale/mock sessions
         const matchedUser = usersData.find((u) => u.id === cachedUser.id);
         if (matchedUser) {
           activeUser = matchedUser;
           setCurrentUser(matchedUser);
+          // Keep localStorage in sync with latest DB data (e.g. updated avatar)
+          localStorage.setItem('synctab_user', JSON.stringify(matchedUser));
+        } else {
+          // Cached user no longer exists in DB (DB reset, or mock session)
+          console.warn('SyncTab: cached session is stale — clearing');
+          localStorage.removeItem('synctab_user');
+          setCurrentUser(null);
         }
       }
 
@@ -1076,7 +1139,203 @@ function App() {
     setupMockData();
   };
 
-  // ==================== USER Presences ====================
+  // Initialize profile form when user changes
+  useEffect(() => {
+    if (currentUser) {
+      setProfileName(currentUser.name);
+      setProfileEmail(currentUser.email || '');
+    }
+  }, [currentUser]);
+
+  // Fetch linked Google accounts when entering customize tab or user changes
+  const fetchLinkedAccounts = async (userId?: string) => {
+    const id = userId || currentUser?.id;
+    if (!id || !isOnline) return;
+    try {
+      const res = await fetch(`${API_BASE}/users/${id}/google-accounts`);
+      if (res.ok) {
+        const data = await unpackJson(res);
+        setLinkedAccounts(data);
+      }
+    } catch (e) { console.error(e); }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'customize' && currentUser && isOnline) {
+      fetchLinkedAccounts();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser) return;
+    if (profilePassword && profilePassword !== profileConfirmPassword) {
+      setProfileSaveMsg({ type: 'error', text: 'Passwords do not match.' });
+      return;
+    }
+    setProfileSaving(true);
+    setProfileSaveMsg(null);
+    try {
+      const body: Record<string, string> = {};
+      if (profileName.trim() && profileName !== currentUser.name) body.name = profileName.trim();
+      if (profileEmail.trim() && profileEmail !== currentUser.email) body.email = profileEmail.trim();
+      if (profilePassword.trim()) body.password = profilePassword.trim();
+
+      if (Object.keys(body).length === 0) {
+        setProfileSaveMsg({ type: 'success', text: 'No changes to save.' });
+        setProfileSaving(false);
+        return;
+      }
+
+      const res = await fetch(`${API_BASE}/users/${currentUser.id}/profile`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const errMsg = await unpackError(res, 'Failed to update profile');
+        throw new Error(errMsg);
+      }
+
+      const updatedUser = await unpackJson(res);
+      setCurrentUser(updatedUser);
+      localStorage.setItem('synctab_user', JSON.stringify(updatedUser));
+      setProfilePassword('');
+      setProfileConfirmPassword('');
+      setProfileSaveMsg({ type: 'success', text: 'Profile updated successfully!' });
+    } catch (err: unknown) {
+      const raw = err instanceof Error ? err.message : 'Failed to update profile';
+      const msg = isStaleSessionError(raw)
+        ? 'Your session has expired. Please sign out and sign back in.'
+        : raw;
+      setProfileSaveMsg({ type: 'error', text: msg });
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
+  const handleLinkGoogleViaPopup = () => {
+    if (!currentUser) return;
+    setLinkGoogleMsg(null);
+    setLinkingGoogle(true);
+
+    const width = 500, height = 650;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+    const popup = window.open(
+      `${API_BASE}/auth/google/login`,
+      'google-link-oauth',
+      `width=${width},height=${height},left=${left},top=${top},status=no,resizable=yes`
+    );
+
+    if (!popup) {
+      setLinkingGoogle(false);
+      setLinkGoogleMsg({ type: 'error', text: 'Popup blocked. Allow popups for this site.' });
+      return;
+    }
+
+    const handleMsg = async (event: MessageEvent) => {
+      try {
+        const apiOrigin = new URL(API_BASE).origin;
+        if (event.origin !== apiOrigin) return;
+      } catch { return; }
+
+      if (event.data?.type === 'GOOGLE_AUTH_SUCCESS') {
+        // Use event.data.googleEmail — the raw Google email that was just authenticated
+        // (event.data.user is the primary SyncTab user and may have a different email)
+        const googleEmail = event.data.googleEmail || event.data.user?.email;
+        const googleUser = event.data.user;
+        if (!googleEmail) { setLinkingGoogle(false); window.removeEventListener('message', handleMsg); return; }
+        // Now link this Google email to the current user
+        try {
+          const res = await fetch(`${API_BASE}/users/${currentUser.id}/google-accounts`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              googleEmail,
+              displayName: googleUser?.name,
+              avatarUrl: googleUser?.avatar,
+            }),
+          });
+          if (!res.ok) {
+            const errMsg = await unpackError(res, 'Failed to link account');
+            throw new Error(errMsg);
+          }
+          await fetchLinkedAccounts();
+          setLinkGoogleMsg({ type: 'success', text: `${googleEmail} linked successfully!` });
+        } catch (err: unknown) {
+          const raw = err instanceof Error ? err.message : 'Failed to link account';
+          const msg = isStaleSessionError(raw)
+            ? 'Session expired — please sign out and sign back in.'
+            : raw;
+          setLinkGoogleMsg({ type: 'error', text: msg });
+        }
+        setLinkingGoogle(false);
+        window.removeEventListener('message', handleMsg);
+      } else if (event.data?.type === 'GOOGLE_AUTH_FAILURE') {
+        // Fallback: allow manual email entry
+        setLinkingGoogle(false);
+        window.removeEventListener('message', handleMsg);
+      }
+
+    };
+
+    window.addEventListener('message', handleMsg);
+    const timer = setInterval(() => {
+      if (popup.closed) {
+        clearInterval(timer);
+        setLinkingGoogle(false);
+        window.removeEventListener('message', handleMsg);
+      }
+    }, 1000);
+  };
+
+  const handleLinkGoogleByEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser || !newGoogleEmail.trim()) return;
+    setLinkGoogleMsg(null);
+    setLinkingGoogle(true);
+    try {
+      const res = await fetch(`${API_BASE}/users/${currentUser.id}/google-accounts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ googleEmail: newGoogleEmail.trim() }),
+      });
+      if (!res.ok) {
+        const errMsg = await unpackError(res, 'Failed to link account');
+        throw new Error(errMsg);
+      }
+      await fetchLinkedAccounts();
+      setNewGoogleEmail('');
+      setLinkGoogleMsg({ type: 'success', text: `${newGoogleEmail.trim()} linked!` });
+    } catch (err: unknown) {
+      const raw = err instanceof Error ? err.message : 'Failed to link account';
+      const msg = isStaleSessionError(raw)
+        ? 'Session expired — please sign out and sign back in.'
+        : raw;
+      setLinkGoogleMsg({ type: 'error', text: msg });
+    } finally {
+      setLinkingGoogle(false);
+    }
+  };
+
+  const handleUnlinkGoogleAccount = async (googleEmail: string) => {
+    if (!currentUser) return;
+    try {
+      const encodedEmail = encodeURIComponent(googleEmail);
+      const res = await fetch(`${API_BASE}/users/${currentUser.id}/google-accounts/${encodedEmail}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        setLinkedAccounts((prev) => prev.filter((a) => a.googleEmail !== googleEmail));
+        setLinkGoogleMsg({ type: 'success', text: `${googleEmail} unlinked.` });
+      }
+    } catch (e) { console.error(e); }
+  };
+
+
 
   const handleStatusChange = async (status: string) => {
     if (!currentUser) return;
@@ -1783,9 +2042,11 @@ function App() {
 
           {/* User Profile Avatar with dropdown trigger */}
           {currentUser && (
-            <button className="widget-circle-btn widget-profile-btn" onClick={() => setShowProfileDropdown(!showProfileDropdown)}>
-              <div className={`widget-avatar ${currentUser.avatar}`}>
-                {currentUser.name.charAt(0).toUpperCase()}
+            <button className="widget-circle-btn widget-profile-btn" onClick={() => setShowProfileDropdown(!showProfileDropdown)}
+              style={{ position: 'relative', padding: 0, overflow: 'visible', background: 'transparent', border: 'none' }}
+            >
+              <div style={{ position: 'relative', display: 'inline-flex' }}>
+                <AvatarDisplay avatar={currentUser.avatar} name={currentUser.name} size={36} />
                 <span className={`widget-status-dot ${currentUser.status.toLowerCase().replace(' ', '')}`} />
               </div>
             </button>
@@ -1811,8 +2072,8 @@ function App() {
                 window.open('https://myaccount.google.com', '_blank', 'noopener,noreferrer');
                 setShowProfileDropdown(false);
               }}>
-                <div className={`launcher-icon-circle ${currentUser.avatar}`}>
-                  {currentUser.name.charAt(0).toUpperCase()}
+                <div className="launcher-icon-circle" style={{ padding: 0, overflow: 'hidden', background: 'transparent', border: '1px solid rgba(255,255,255,0.12)' }}>
+                  <AvatarDisplay avatar={currentUser.avatar} name={currentUser.name} size={38} />
                 </div>
                 <span className="launcher-label">Account</span>
               </div>
@@ -2516,11 +2777,142 @@ function App() {
 
                 <div className="customize-main-content" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: '4px', marginTop: '16px' }}>
                   
-                  {/* Left Column: Aesthetics, Layout & Clock Settings */}
+                  {/* Left Column: Profile, Aesthetics, Layout & Clock Settings */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                    
+
+                    {/* ====== PROFILE & ACCOUNT CARD ====== */}
+                    {currentUser && (
+                      <div style={{ background: 'rgba(255,255,255,0.015)', border: '1px solid var(--panel-border)', borderRadius: 'var(--radius-md)', padding: '16px' }}>
+                        <h4 style={{ fontSize: '13px', fontWeight: 700, marginBottom: '6px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <UserIcon size={14} color="var(--primary)" /> Profile &amp; Account
+                        </h4>
+                        <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '14px' }}>
+                          Update your display name, login email, or set a new password.
+                        </p>
+
+                        {/* Profile picture preview */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '16px', padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--panel-border)' }}>
+                          <div style={{ position: 'relative', flexShrink: 0 }}>
+                            <AvatarDisplay avatar={currentUser.avatar} name={currentUser.name} size={56} />
+                            {(currentUser.avatar.startsWith('http') || currentUser.avatar.startsWith('data:')) && (
+                              <div style={{ position: 'absolute', bottom: -2, right: -2, background: '#34a853', borderRadius: '50%', width: '14px', height: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid var(--panel-bg)' }}>
+                                <svg width="8" height="8" viewBox="0 0 24 24" fill="white"><path d="M12 0C5.374 0 0 5.373 0 12c0 6.628 5.374 12 12 12 6.628 0 12-5.372 12-12 0-6.627-5.372-12-12-12z"/></svg>
+                              </div>
+                            )}
+                          </div>
+                          <div>
+                            <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{currentUser.name}</div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{currentUser.email || 'No email set'}</div>
+                            {(currentUser.avatar.startsWith('http') || currentUser.avatar.startsWith('data:')) && (
+                              <div style={{ fontSize: '10px', color: '#34a853', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <Shield size={10} /> Google Profile Photo
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <form onSubmit={handleSaveProfile} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                          {/* Name */}
+                          <div>
+                            <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px' }}>
+                              <UserIcon size={11} /> Display Name
+                            </label>
+                            <input
+                              type="text"
+                              className="form-input"
+                              placeholder="Your display name"
+                              value={profileName}
+                              onChange={(e) => setProfileName(e.target.value)}
+                            />
+                          </div>
+                          {/* Email */}
+                          <div>
+                            <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px' }}>
+                              <Mail size={11} /> Email Address
+                            </label>
+                            <input
+                              type="email"
+                              className="form-input"
+                              placeholder="your@email.com"
+                              value={profileEmail}
+                              onChange={(e) => setProfileEmail(e.target.value)}
+                            />
+                          </div>
+                          {/* Password */}
+                          <div>
+                            <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px' }}>
+                              <KeyRound size={11} /> New Password
+                            </label>
+                            <input
+                              type="password"
+                              className="form-input"
+                              placeholder="Leave blank to keep current"
+                              value={profilePassword}
+                              onChange={(e) => setProfilePassword(e.target.value)}
+                            />
+                          </div>
+                          {profilePassword && (
+                            <div>
+                              <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px', display: 'block' }}>
+                                Confirm New Password
+                              </label>
+                              <input
+                                type="password"
+                                className="form-input"
+                                placeholder="Repeat new password"
+                                value={profileConfirmPassword}
+                                onChange={(e) => setProfileConfirmPassword(e.target.value)}
+                              />
+                            </div>
+                          )}
+
+                          {profileSaveMsg && (
+                            <div style={{
+                              fontSize: '11px',
+                              padding: '7px 10px',
+                              borderRadius: '6px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              flexWrap: 'wrap',
+                              background: profileSaveMsg.type === 'success' ? 'rgba(52, 168, 83, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                              border: `1px solid ${profileSaveMsg.type === 'success' ? 'rgba(52,168,83,0.25)' : 'rgba(239,68,68,0.25)'}`,
+                              color: profileSaveMsg.type === 'success' ? '#34a853' : '#ef4444',
+                            }}>
+                              <AlertCircle size={11} />
+                              <span style={{ flex: 1 }}>{profileSaveMsg.text}</span>
+                              {profileSaveMsg.type === 'error' && isStaleSessionError(profileSaveMsg.text) && (
+                                <button
+                                  type="button"
+                                  onClick={() => { handleLogout(); setShowProfileDropdown(false); }}
+                                  style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '4px', padding: '3px 8px', color: '#ef4444', cursor: 'pointer', fontSize: '10px', fontWeight: 700, whiteSpace: 'nowrap' }}
+                                >
+                                  Sign Out Now
+                                </button>
+                              )}
+                            </div>
+                          )}
+
+                          <button
+                            type="submit"
+                            disabled={profileSaving || !isOnline}
+                            className="btn-primary"
+                            style={{ alignSelf: 'flex-start', padding: '7px 14px', fontSize: '11px', gap: '4px', marginTop: '2px' }}
+                          >
+                            {profileSaving ? 'Saving...' : 'Save Changes'}
+                          </button>
+                          {!isOnline && (
+                            <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                              Profile editing requires an online connection.
+                            </span>
+                          )}
+                        </form>
+                      </div>
+                    )}
+
                     {/* Theme & Brand Styling Card */}
                     <div style={{ background: 'rgba(255,255,255,0.015)', border: '1px solid var(--panel-border)', borderRadius: 'var(--radius-md)', padding: '16px' }}>
+
                       <h4 style={{ fontSize: '13px', fontWeight: 700, marginBottom: '6px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <Palette size={14} color="var(--primary)" /> Theme & Aesthetics
                       </h4>
@@ -2772,11 +3164,124 @@ function App() {
 
                   </div>
 
-                  {/* Right Column: Wallpaper Management & Cloudinary Image Uploads */}
+                  {/* Right Column: Linked Accounts, Wallpaper Management & Cloudinary Image Uploads */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                    
+
+                    {/* ====== LINKED GOOGLE ACCOUNTS CARD ====== */}
+                    {currentUser && (
+                      <div style={{ background: 'rgba(255,255,255,0.015)', border: '1px solid var(--panel-border)', borderRadius: 'var(--radius-md)', padding: '16px' }}>
+                        <h4 style={{ fontSize: '13px', fontWeight: 700, marginBottom: '6px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <Shield size={14} color="var(--primary)" /> Linked Google Accounts
+                        </h4>
+                        <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+                          Link multiple Google accounts to this profile. Any linked Google account can sign in and access your bookmarks, tasks, and configuration.
+                        </p>
+
+                        {/* Linked accounts list */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '12px' }}>
+                          {linkedAccounts.length === 0 && (
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic', padding: '10px', textAlign: 'center', background: 'rgba(255,255,255,0.01)', borderRadius: '6px', border: '1px dashed var(--panel-border)' }}>
+                              No Google accounts linked yet
+                            </div>
+                          )}
+                          {linkedAccounts.map((acct) => (
+                            <div key={acct.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--panel-border)', borderRadius: '8px' }}>
+                              {acct.avatarUrl ? (
+                                <img src={acct.avatarUrl} alt={acct.googleEmail} referrerPolicy="no-referrer" style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
+                              ) : (
+                                <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--primary-glow)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 700, color: 'var(--primary)', flexShrink: 0 }}>
+                                  {acct.googleEmail.charAt(0).toUpperCase()}
+                                </div>
+                              )}
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {acct.displayName || acct.googleEmail}
+                                </div>
+                                <div style={{ fontSize: '10px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {acct.googleEmail}
+                                </div>
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <svg width="12" height="12" viewBox="0 0 24 24"><path fill="#34a853" d="M12 0C5.374 0 0 5.373 0 12c0 6.628 5.374 12 12 12 6.628 0 12-5.372 12-12 0-6.627-5.372-12-12-12z"/></svg>
+                                <button
+                                  type="button"
+                                  onClick={() => handleUnlinkGoogleAccount(acct.googleEmail)}
+                                  title={`Unlink ${acct.googleEmail}`}
+                                  style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '6px', padding: '4px 6px', color: '#ef4444', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '3px', fontSize: '10px', fontWeight: 600 }}
+                                >
+                                  <Unlink size={10} /> Remove
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Add via Google OAuth popup */}
+                        {isOnline && (
+                          <button
+                            type="button"
+                            onClick={handleLinkGoogleViaPopup}
+                            disabled={linkingGoogle}
+                            className="google-auth-btn"
+                            style={{ width: '100%', marginBottom: '10px', fontSize: '11px', padding: '8px' }}
+                          >
+                            <svg viewBox="0 0 24 24" style={{ width: '14px', height: '14px' }}>
+                              <path fill="#EA4335" d="M12 5.04c1.66 0 3.2.57 4.38 1.69l3.27-3.27C17.67 1.54 14.98 1 12 1 7.35 1 3.37 3.68 1.48 7.58l3.96 3.07C6.39 7.42 9.01 5.04 12 5.04z"/>
+                              <path fill="#4285F4" d="M23.49 12.27c0-.81-.07-1.59-.2-2.36H12v4.51h6.46c-.29 1.48-1.14 2.73-2.4 3.58l3.73 2.89c2.18-2.01 3.7-4.99 3.7-8.62z"/>
+                              <path fill="#FBBC05" d="M5.44 14.78c-.24-.72-.38-1.49-.38-2.28s.14-1.56.38-2.28L1.48 7.15C.53 9.07 0 11.22 0 13.5s.53 4.43 1.48 6.35l3.96-3.07z"/>
+                              <path fill="#34A853" d="M12 23c3.24 0 5.97-1.07 7.96-2.91l-3.73-2.89c-1.1.74-2.51 1.18-4.23 1.18-2.99 0-5.61-2.38-6.56-5.61l-3.96 3.07C3.37 20.32 7.35 23 12 23z"/>
+                            </svg>
+                            {linkingGoogle ? 'Linking...' : 'Link Another Google Account'}
+                          </button>
+                        )}
+
+                        {/* Manual email fallback */}
+                        <form onSubmit={handleLinkGoogleByEmail} style={{ display: 'flex', gap: '6px' }}>
+                          <input
+                            type="email"
+                            className="form-input"
+                            placeholder="or type Google email manually…"
+                            value={newGoogleEmail}
+                            onChange={(e) => setNewGoogleEmail(e.target.value)}
+                            style={{ flex: 1, fontSize: '11px' }}
+                          />
+                          <button type="submit" disabled={linkingGoogle || !newGoogleEmail.trim() || !isOnline} className="btn-primary" style={{ padding: '6px 10px', fontSize: '11px', flexShrink: 0 }}>
+                            <Link2 size={12} />
+                          </button>
+                        </form>
+
+                        {linkGoogleMsg && (
+                          <div style={{
+                            fontSize: '11px', padding: '7px 10px', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px', flexWrap: 'wrap',
+                            background: linkGoogleMsg.type === 'success' ? 'rgba(52,168,83,0.1)' : 'rgba(239,68,68,0.1)',
+                            border: `1px solid ${linkGoogleMsg.type === 'success' ? 'rgba(52,168,83,0.25)' : 'rgba(239,68,68,0.25)'}`,
+                            color: linkGoogleMsg.type === 'success' ? '#34a853' : '#ef4444',
+                          }}>
+                            <AlertCircle size={11} />
+                            <span style={{ flex: 1 }}>{linkGoogleMsg.text}</span>
+                            {linkGoogleMsg.type === 'error' && isStaleSessionError(linkGoogleMsg.text) && (
+                              <button
+                                type="button"
+                                onClick={() => { handleLogout(); setShowProfileDropdown(false); }}
+                                style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '4px', padding: '3px 8px', color: '#ef4444', cursor: 'pointer', fontSize: '10px', fontWeight: 700, whiteSpace: 'nowrap' }}
+                              >
+                                Sign Out Now
+                              </button>
+                            )}
+                          </div>
+                        )}
+
+                        {!isOnline && (
+                          <p style={{ fontSize: '10px', color: 'var(--text-muted)', fontStyle: 'italic', marginTop: '8px' }}>
+                            Linking accounts requires an online connection.
+                          </p>
+                        )}
+                      </div>
+                    )}
+
                     {/* Background Wallpapers Grid */}
                     <div style={{ background: 'rgba(255,255,255,0.015)', border: '1px solid var(--panel-border)', borderRadius: 'var(--radius-md)', padding: '16px' }}>
+
                       <h4 style={{ fontSize: '13px', fontWeight: 700, marginBottom: '8px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <ImageIcon size={14} color="var(--primary)" /> Select Background Wallpaper
                       </h4>
