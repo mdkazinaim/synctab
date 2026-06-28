@@ -287,9 +287,9 @@
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
+  border-radius: 6px;
   box-shadow: 0 24px 64px rgba(0,0,0,0.6);
-  z-index: 999;
+  z-index: 1000000;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -734,4 +734,54 @@
   opacity: 0.6;
   transform: scale(0.98);
 }
+
+/* Accordion Sub-menu styles for Widget Customization Panel */
+.wc-panel-sub-list {
+  background: rgba(10, 11, 20, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+  padding: 4px;
+  margin-top: -2px;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wc-panel-sub-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: grab;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.wc-panel-sub-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+}
+
+.wc-panel-sub-item:active {
+  cursor: grabbing;
+}
+
+.wc-panel-sub-icon {
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  opacity: 0.8;
+}
+
+.wc-panel-sub-label {
+  flex: 1;
+}
+
 

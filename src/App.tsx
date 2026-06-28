@@ -17,7 +17,6 @@ import {
   Moon,
   ChevronRight,
   X,
-  Search,
   Edit2,
   LogOut,
   Sliders,
@@ -249,14 +248,20 @@ function App() {
         if (activeTab !== 'dashboard' && !activeTab.startsWith('page_')) {
           setActiveTab('dashboard');
         }
-        setIsWidgetPanelOpen(prev => !prev);
-        setIsWidgetEditing(false);
+        const nextPanelOpen = !isWidgetPanelOpen;
+        setIsWidgetPanelOpen(nextPanelOpen);
+        if (nextPanelOpen) {
+          setIsWidgetEditing(true);
+        }
       } else if (isEditWidgets) {
         if (activeTab !== 'dashboard' && !activeTab.startsWith('page_')) {
           setActiveTab('dashboard');
         }
-        setIsWidgetEditing(prev => !prev);
-        setIsWidgetPanelOpen(false);
+        const nextEditing = !isWidgetEditing;
+        setIsWidgetEditing(nextEditing);
+        if (!nextEditing) {
+          setIsWidgetPanelOpen(false);
+        }
       } else {
         setActiveTab(id);
         setIsWidgetEditing(false);
@@ -505,9 +510,7 @@ function App() {
   // Saving state indicator for notes
   const [noteSavingStatus, setNoteSavingStatus] = useState<'saved' | 'saving' | 'dirty'>('saved');
 
-  // Time & Date state
-  const [timeStr, setTimeStr] = useState('');
-  const [dateStr, setDateStr] = useState('');
+
 
   // Authentication states
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'google'>('login');
@@ -519,7 +522,7 @@ function App() {
   const [authLoading, setAuthLoading] = useState(false);
   const [isGoogleSimOpen, setIsGoogleSimOpen] = useState(false);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+
 
   // Profile editing state
   const [profileName, setProfileName] = useState('');
@@ -535,11 +538,7 @@ function App() {
   const [linkingGoogle, setLinkingGoogle] = useState(false);
   const [linkGoogleMsg, setLinkGoogleMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!searchQuery.trim()) return;
-    window.open(`https://www.google.com/search?q=${encodeURIComponent(searchQuery)}`, '_blank');
-  };
+
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const socketRef = useRef<Socket | null>(null);
@@ -562,17 +561,7 @@ function App() {
     };
   }, []);
 
-  // Time ticker
-  useEffect(() => {
-    const updateTime = () => {
-      const d = new Date();
-      setTimeStr(d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: !clockFormat24h }));
-      setDateStr(d.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' }));
-    };
-    updateTime();
-    const interval = setInterval(updateTime, 1000);
-    return () => clearInterval(interval);
-  }, [clockFormat24h]);
+
 
   // Theme effect
   useEffect(() => {
@@ -2384,51 +2373,10 @@ function App() {
           <>
             {/* Navigated Tabs */}
             
-            {/* A. DASHBOARD VIEW (Home view with Circle and Search) */}
+            {/* A. DASHBOARD VIEW (Home view with widgets) */}
             {activeTab === 'dashboard' && (
               <div style={{ position: 'relative', width: '100%', flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                {/* Static dashboard content (clock, search) */}
-                <div className="home-page-container" style={{ pointerEvents: 'auto', zIndex: 5, position: 'relative' }}>
-                  {/* Glowing Circle Widget */}
-                  <div className="circle-widget">
-                    <div className="circle-time" style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: '4px' }}>
-                      <span>{timeStr.slice(0, 5)}</span>
-                      {!clockFormat24h && timeStr.split(' ')[1] && (
-                        <span style={{ fontSize: '12px', fontWeight: 800, textTransform: 'uppercase', opacity: 0.8, color: 'var(--primary)', letterSpacing: '0.5px' }}>
-                          {timeStr.split(' ')[1]}
-                        </span>
-                      )}
-                    </div>
-                    <div className="circle-greeting">
-                      {customGreeting || (() => {
-                        const hour = new Date().getHours();
-                        const name = currentUser?.name.split(' ')[0] || 'User';
-                        if (hour < 12) return `Good morning, ${name}`;
-                        if (hour < 18) return `Good afternoon, ${name}`;
-                        return `Good evening, ${name}`;
-                      })()}
-                    </div>
-                    <div className="circle-date" style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', opacity: 0.8 }}>
-                      {dateStr}
-                    </div>
-                  </div>
-
-                  {/* Sleek Search Bar */}
-                  <form onSubmit={handleSearchSubmit} className="search-bar-container">
-                    <input
-                      type="text"
-                      className="search-input"
-                      placeholder="Search Google..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                    />
-                    <button type="submit" className="search-btn">
-                      <Search size={18} />
-                    </button>
-                  </form>
-                </div>
-
-                {/* Draggable Widget Canvas — floats above dashboard content */}
+                {/* Draggable Widget Canvas */}
                 <WidgetCanvas
                   pageId="dashboard"
                   tasks={tasks}
@@ -2437,6 +2385,7 @@ function App() {
                   setIsEditing={setIsWidgetEditing}
                   isPanelOpen={isWidgetPanelOpen}
                   setIsPanelOpen={setIsWidgetPanelOpen}
+                  currentUser={currentUser}
                 />
               </div>
             )}
@@ -2488,6 +2437,7 @@ function App() {
                       setIsEditing={setIsWidgetEditing}
                       isPanelOpen={isWidgetPanelOpen}
                       setIsPanelOpen={setIsWidgetPanelOpen}
+                      currentUser={currentUser}
                     />
                   </div>
                 );

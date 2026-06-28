@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   Plus, Search, Share2, X, ChevronLeft, ChevronRight, ChevronDown, Trash2, Edit2, Check, RefreshCw, FolderOpen
@@ -65,7 +65,6 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
     return `Sync_${userEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
   });
   const [searchQuery, setSearchQuery] = useState('');
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [openColMenu, setOpenColMenu] = useState<string | null>(null);
   
   // Custom spaces & columns state
@@ -129,10 +128,13 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
   const [isSyncing, setIsSyncing] = useState(false);
 
   // Open tabs list (synchronized with synctab_recent_tabs)
-  const [openTabs] = useState<Array<{ id: string; title: string; url: string }>>(() => {
+  const [openTabs, setOpenTabs] = useState<Array<{ id: string; title: string; url: string }>>(() => {
     try {
       const saved = localStorage.getItem('synctab_recent_tabs');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
     } catch {}
     return [
       { id: 't1', title: 'Kids Car Song Script', url: 'https://youtube.com' },
@@ -147,6 +149,100 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
       { id: 't10', title: '(1) Make FREE AI Videos (Dialogu...', url: 'https://youtube.com' },
     ];
   });
+
+  const refreshOpenTabs = useCallback(() => {
+    try {
+      if (
+        typeof window !== 'undefined' &&
+        (window as any).chrome &&
+        (window as any).chrome.tabs &&
+        typeof (window as any).chrome.tabs.query === 'function'
+      ) {
+        (window as any).chrome.tabs.query({}, (tabs: any[]) => {
+          if (Array.isArray(tabs)) {
+            const formatted = tabs
+              .filter(t => t && t.url && t.title)
+              .map((t, idx) => ({
+                id: t.id?.toString() || `tab_${idx}_${Date.now()}`,
+                title: t.title || '',
+                url: t.url || ''
+              }));
+            
+            const realUnique: Array<{ id: string; title: string; url: string }> = [];
+            const realSeen = new Set<string>();
+            for (const tab of formatted) {
+              let normUrl = tab.url.toLowerCase();
+              try {
+                const u = new URL(tab.url);
+                normUrl = (u.origin + u.pathname).toLowerCase().replace(/\/$/, '');
+              } catch (e) {}
+              
+              if (!realSeen.has(normUrl)) {
+                realSeen.add(normUrl);
+                realUnique.push(tab);
+              }
+            }
+            if (realUnique.length > 0) {
+              setOpenTabs(realUnique);
+              localStorage.setItem('synctab_recent_tabs', JSON.stringify(realUnique));
+            }
+          }
+        });
+      }
+    } catch (e) {
+      console.warn("Failed to query chrome tabs inside BookmarksManager, keeping mock tabs:", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Query initially
+    refreshOpenTabs();
+
+    // Listen to real-time Chrome tab events safely
+    try {
+      const hasChromeTabs = typeof window !== 'undefined' && 
+                            (window as any).chrome && 
+                            (window as any).chrome.tabs;
+      
+      if (hasChromeTabs) {
+        const tabsAPI = (window as any).chrome.tabs;
+        
+        const listener = () => {
+          refreshOpenTabs();
+        };
+
+        if (tabsAPI.onCreated && typeof tabsAPI.onCreated.addListener === 'function') {
+          tabsAPI.onCreated.addListener(listener);
+        }
+        if (tabsAPI.onUpdated && typeof tabsAPI.onUpdated.addListener === 'function') {
+          tabsAPI.onUpdated.addListener(listener);
+        }
+        if (tabsAPI.onRemoved && typeof tabsAPI.onRemoved.addListener === 'function') {
+          tabsAPI.onRemoved.addListener(listener);
+        }
+        if (tabsAPI.onMoved && typeof tabsAPI.onMoved.addListener === 'function') {
+          tabsAPI.onMoved.addListener(listener);
+        }
+        if (tabsAPI.onActivated && typeof tabsAPI.onActivated.addListener === 'function') {
+          tabsAPI.onActivated.addListener(listener);
+        }
+
+        return () => {
+          try {
+            tabsAPI.onCreated?.removeListener(listener);
+            tabsAPI.onUpdated?.removeListener(listener);
+            tabsAPI.onRemoved?.removeListener(listener);
+            tabsAPI.onMoved?.removeListener(listener);
+            tabsAPI.onActivated?.removeListener(listener);
+          } catch (err) {
+            console.warn("Failed to remove tab listeners:", err);
+          }
+        };
+      }
+    } catch (e) {
+      console.warn("Failed to set up chrome tab event listeners:", e);
+    }
+  }, [refreshOpenTabs]);
 
   // Track inline add-card forms
   const [showAddForm, setShowAddForm] = useState<Record<string, boolean>>({});
@@ -164,12 +260,22 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
     }
   }, [selectedSpaceId, pendingScrollColumn]);
 
-  const currentSyncSpaceId = React.useMemo(() => {
+  const [currentSyncSpaceId, setCurrentSyncSpaceId] = useState<string>(() => {
+    const saved = localStorage.getItem('synctab_current_browser_sync_space_id');
+    if (saved) return saved;
+
     const userStr = localStorage.getItem('synctab_user');
     const user = userStr ? JSON.parse(userStr) : null;
     const userEmail = user?.email || 'User';
-    return `Sync_${userEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
-  }, []);
+    const fallbackId = `Sync_${userEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
+    localStorage.setItem('synctab_current_browser_sync_space_id', fallbackId);
+    return fallbackId;
+  });
+
+  const handleSetCurrentBrowserSyncSpace = () => {
+    localStorage.setItem('synctab_current_browser_sync_space_id', selectedSpaceId);
+    setCurrentSyncSpaceId(selectedSpaceId);
+  };
 
 
 
@@ -254,9 +360,53 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
     });
   };
 
-  // Check if active space is the Sync space
+  // Load linked Google Accounts on mount and add them as Sync spaces
+  useEffect(() => {
+    const loadLinkedSpaces = async () => {
+      const userStr = localStorage.getItem('synctab_user');
+      const user = userStr ? JSON.parse(userStr) : null;
+      if (!user) return;
+
+      const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:3000';
+      try {
+        const res = await fetch(`${apiBase}/users/${user.id}/google-accounts`);
+        if (res.ok) {
+          const result = await res.json();
+          const accounts = Array.isArray(result) ? result : (result.data || []);
+          
+          setSpaces((prevSpaces: any[]) => {
+            let updated = [...prevSpaces];
+            let changed = false;
+            accounts.forEach((acct: any) => {
+              const email = acct.googleEmail;
+              const spaceId = `Sync_${email.replace(/[^a-zA-Z0-9]/g, '_')}`;
+              if (!updated.some(s => s.id === spaceId)) {
+                updated.push({
+                  id: spaceId,
+                  name: `${email}'s Bookmarks`,
+                  icon: '🔄',
+                  isSyncSpace: true
+                });
+                changed = true;
+              }
+            });
+            if (changed) {
+              localStorage.setItem('synctab_custom_spaces', JSON.stringify(updated));
+            }
+            return updated;
+          });
+        }
+      } catch (e) {
+        console.error('Error fetching linked accounts inside BookmarksManager:', e);
+      }
+    };
+
+    loadLinkedSpaces();
+  }, []);
+
+  // Sync is active only if it is a sync space AND it matches the current browser user's sync space
   const activeSpace = spaces.find((s: any) => s.id === selectedSpaceId);
-  const isSyncActive = activeSpace?.isSyncSpace || false;
+  const isSyncActive = (activeSpace?.isSyncSpace && selectedSpaceId === currentSyncSpaceId) || false;
 
   // Sync with Browser Bookmarks (Two-Way Sync)
   const handleSyncBrowser = async () => {
@@ -327,10 +477,22 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
         return space === selectedSpaceId;
       });
 
-      // A. Upload new bookmarks from browser to database
+      // A. Upload new bookmarks from browser to database, and update existing ones if folder/title changed
       const toUpload = browserBms.filter(bb => !dbBms.some(db => db.url === bb.url));
-      await Promise.all(
-        toUpload.map(bb => 
+      const toUpdate = browserBms.map(bb => {
+        const existing = dbBms.find(db => db.url === bb.url);
+        if (existing) {
+          const expectedCategory = `${selectedSpaceId}/${bb.folderName}`;
+          if (existing.category !== expectedCategory || existing.title !== bb.title) {
+            return { id: existing.id, title: bb.title, category: expectedCategory };
+          }
+        }
+        return null;
+      }).filter(Boolean) as Array<{ id: string; title: string; category: string }>;
+
+      // Run uploads and updates in parallel
+      await Promise.all([
+        ...toUpload.map(bb => 
           fetch(`${apiBase}/bookmarks`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -342,8 +504,18 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
               userId: user.id
             })
           })
+        ),
+        ...toUpdate.map(up => 
+          fetch(`${apiBase}/bookmarks/${up.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: up.title,
+              category: up.category
+            })
+          })
         )
-      );
+      ]);
 
       // B. Download bookmarks from database to browser (that are not in the browser)
       const toDownload = dbBms.filter(db => !browserBms.some(bb => bb.url === db.url));
@@ -405,6 +577,18 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
     } catch (err) {
       console.error('Sync failed:', err);
       await showAlert('Sync Error', 'Synchronization failed. Please check the console.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Sync with Cloud Only (Fetch/Refresh Bookmarks from Backend)
+  const handleSyncCloudOnly = async () => {
+    setIsSyncing(true);
+    try {
+      await onRefresh();
+    } catch (err) {
+      console.error('Cloud sync failed:', err);
     } finally {
       setIsSyncing(false);
     }
@@ -932,11 +1116,33 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
   };
 
 
-  // Filter bookmarks by search query and space
-  const activeColumns = customColumns[selectedSpaceId] || ['General'];
+  // Extract all columns present in the database bookmarks for this space
+  const dbColumnsForSpace = useMemo<string[]>(() => {
+    const cols = new Set<string>();
+    bookmarks.forEach(b => {
+      const [space, col] = parseCategory(b.category);
+      if (space === selectedSpaceId && col) {
+        cols.add(col);
+      }
+    });
+    return Array.from(cols);
+  }, [bookmarks, selectedSpaceId]);
+
+  // Combine local customColumns with any columns found in the database bookmarks
+  const activeColumns = useMemo<string[]>(() => {
+    const localCols = customColumns[selectedSpaceId] || [];
+    const combined = [...localCols];
+    dbColumnsForSpace.forEach((col: string) => {
+      if (!combined.includes(col)) {
+        combined.push(col);
+      }
+    });
+    // If no columns at all, default to ['General']
+    return combined.length > 0 ? combined : ['General'];
+  }, [customColumns, selectedSpaceId, dbColumnsForSpace]);
 
   // Group bookmarks by column and sort by custom order
-  const columnBookmarks = activeColumns.reduce((acc, colName) => {
+  const columnBookmarks = activeColumns.reduce((acc: Record<string, BookmarkItem[]>, colName: string) => {
     const category = `${selectedSpaceId}/${colName}`;
     const colList = bookmarks.filter(b => {
       const [space, col] = parseCategory(b.category);
@@ -1289,15 +1495,30 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
       {/* 2. MAIN CONTENT AREA */}
       <div className="bm-mgr-main">
         <div className="bm-mgr-header">
-          <div className="bm-mgr-header-left">
+          <div className="bm-mgr-header-left" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div className="bm-mgr-space-title">
               <span>{spaces.find((s: any) => s.id === selectedSpaceId)?.icon || '📁'}</span>
               <span>{spaces.find((s: any) => s.id === selectedSpaceId)?.name || selectedSpaceId}</span>
             </div>
+            {activeSpace?.isSyncSpace && (
+              selectedSpaceId === currentSyncSpaceId ? (
+                <span className="bm-mgr-sync-status-badge" title="This space is designated to sync with this browser's bookmarks">
+                  ✓ Local Sync Active
+                </span>
+              ) : (
+                <button 
+                  className="bm-mgr-sync-status-badge-btn" 
+                  onClick={handleSetCurrentBrowserSyncSpace}
+                  title="Click to designate this space to sync with this browser's bookmarks"
+                >
+                  Set as Local Sync
+                </button>
+              )
+            )}
           </div>
 
           <div className="bm-mgr-header-right">
-            {isSyncActive && (
+            {selectedSpaceId === currentSyncSpaceId ? (
               <button 
                 className={`bm-mgr-btn bm-mgr-btn-sync ${isSyncing ? 'syncing' : ''}`} 
                 onClick={handleSyncBrowser}
@@ -1307,13 +1528,19 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
                 <RefreshCw size={14} className={isSyncing ? 'spin' : ''} />
                 <span>{isSyncing ? 'Syncing...' : 'Sync with Browser'}</span>
               </button>
-            )}
+            ) : activeSpace?.isSyncSpace ? (
+              <button 
+                className={`bm-mgr-btn bm-mgr-btn-sync ${isSyncing ? 'syncing' : ''}`} 
+                onClick={handleSyncCloudOnly}
+                disabled={isSyncing}
+                title="Fetch latest bookmarks from backend"
+              >
+                <RefreshCw size={14} className={isSyncing ? 'spin' : ''} />
+                <span>{isSyncing ? 'Syncing...' : 'Sync'}</span>
+              </button>
+            ) : null}
             <button className="bm-mgr-btn">
               <Share2 size={14} /> Share
-            </button>
-            <button className="bm-mgr-btn" onClick={() => setIsDrawerOpen(!isDrawerOpen)}>
-              <span>Open tabs</span>
-              <span className="bm-mgr-badge">{openTabs.length}</span>
             </button>
             <button className="bm-mgr-btn bm-mgr-btn-primary" onClick={handleAddColumn}>
               <Plus size={14} /> Add Column
@@ -1322,6 +1549,65 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
         </div>
 
         <div className="bm-mgr-workspace" style={{ userSelect: ghost.visible ? 'none' : undefined }}>
+          {/* SPECIAL FIRST COLUMN: OPEN TABS */}
+          <div 
+            className="bm-mgr-column bm-mgr-open-tabs-column"
+            style={{ minWidth: '280px', flexShrink: 0 }}
+          >
+            <div className="bm-mgr-column-header" style={{ cursor: 'default' }}>
+              <div className="bm-mgr-column-title-wrapper">
+                <span className="bm-mgr-column-title">Open tabs</span>
+                <span className="bm-mgr-column-count">{openTabs.length}</span>
+              </div>
+              <div className="bm-mgr-column-actions">
+                <button 
+                  className="bm-mgr-icon-btn" 
+                  onClick={refreshOpenTabs}
+                  title="Refresh open tabs"
+                >
+                  <RefreshCw size={14} />
+                </button>
+              </div>
+            </div>
+
+            <div className="bm-mgr-column-cards" style={{ overflowY: 'auto' }}>
+              {openTabs.map(tab => (
+                <div 
+                  key={tab.id}
+                  className="bm-mgr-drawer-tab-card"
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('application/json', JSON.stringify({ 
+                      title: tab.title, 
+                      url: tab.url, 
+                      source: 'drawer' 
+                    }));
+                  }}
+                  onClick={() => window.open(tab.url, '_blank')}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <img 
+                    src={getFavicon(tab.url)} 
+                    alt="" 
+                    width={14} 
+                    height={14}
+                    style={{ borderRadius: '3px' }}
+                    onError={e => {
+                      e.currentTarget.style.display = 'none';
+                    }}
+                  />
+                  <div className="bm-mgr-drawer-tab-info">
+                    <span className="bm-mgr-drawer-tab-title" style={{ fontSize: '13px' }}>{tab.title}</span>
+                    <span className="bm-mgr-drawer-tab-url" style={{ fontSize: '11px' }}>{getDomain(tab.url)}</span>
+                  </div>
+                </div>
+              ))}
+              {openTabs.length === 0 && (
+                <div className="bm-mgr-col-empty">No open tabs found</div>
+              )}
+            </div>
+          </div>
+
           {activeColumns.map(colName => {
             const isAdding = showAddForm[colName];
             const list = (columnBookmarks[colName] || []).filter(b => b.id !== dragState.draggedId);
@@ -1558,65 +1844,7 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
         </div>
       </div>
 
-      {/* 3. RIGHT DRAWER - OPEN TABS */}
-      {isDrawerOpen && (
-        <div className="bm-mgr-drawer">
-          <div className="bm-mgr-drawer-header">
-            <div className="bm-mgr-drawer-title-row">
-              <span className="bm-mgr-drawer-title">Open tabs</span>
-              <span className="bm-mgr-drawer-meta">{openTabs.length} tabs</span>
-            </div>
-            <button 
-              className="bm-mgr-icon-btn" 
-              onClick={() => setIsDrawerOpen(false)}
-              title="Close Panel"
-            >
-              <X size={16} />
-            </button>
-          </div>
 
-          <div className="bm-mgr-drawer-content">
-            <div className="bm-mgr-drawer-section">
-              <div className="bm-mgr-drawer-section-header">
-                <span className="bm-mgr-drawer-section-title">Current window</span>
-                <span className="bm-mgr-drawer-section-count">{openTabs.length} Tabs</span>
-              </div>
-
-              <div className="bm-mgr-drawer-tabs-list">
-                {openTabs.map(tab => (
-                  <div 
-                    key={tab.id}
-                    className="bm-mgr-drawer-tab-card"
-                    draggable
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData('application/json', JSON.stringify({ 
-                        title: tab.title, 
-                        url: tab.url, 
-                        source: 'drawer' 
-                      }));
-                    }}
-                  >
-                    <img 
-                      src={getFavicon(tab.url)} 
-                      alt="" 
-                      width={16} 
-                      height={16}
-                      style={{ borderRadius: '3px' }}
-                      onError={e => {
-                        e.currentTarget.style.display = 'none';
-                      }}
-                    />
-                    <div className="bm-mgr-drawer-tab-info">
-                      <span className="bm-mgr-drawer-tab-title">{tab.title}</span>
-                      <span className="bm-mgr-drawer-tab-url">{getDomain(tab.url)}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* 4. REUSABLE CUSTOM MODAL */}
       {modalConfig.isOpen && (

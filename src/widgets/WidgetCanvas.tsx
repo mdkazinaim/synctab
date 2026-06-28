@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import type { PlacedWidget, WidgetType } from './widgetTypes';
 import { WIDGET_CATALOG, STORAGE_KEY, snapToGrid } from './widgetTypes';
 import {
   ClockWidget, CalendarWidget, WeatherWidget, SearchWidget,
   NotesWidget, QuotesWidget, TasksWidget, BookmarksWidget,
-  CountdownWidget, StocksWidget
+  CountdownWidget, StocksWidget, GreetingWidget
 } from './WidgetContents';
 import './WidgetCanvas.css';
 
@@ -19,19 +20,21 @@ interface WidgetCanvasProps {
   setIsEditing: (val: boolean) => void;
   isPanelOpen: boolean;
   setIsPanelOpen: (val: boolean | ((prev: boolean) => boolean)) => void;
+  currentUser?: { name: string; email?: string | null } | null;
 }
 
 // ─── WIDGET RENDERER ───────────────────────────────────────────────────────
-const WidgetContent: React.FC<{ widget: PlacedWidget; tasks: Task[]; bookmarks: Bookmark[] }> = ({ widget, tasks, bookmarks }) => {
+const WidgetContent: React.FC<{ widget: PlacedWidget; tasks: Task[]; bookmarks: Bookmark[]; currentUser?: { name: string; email?: string | null } | null }> = ({ widget, tasks, bookmarks, currentUser }) => {
   switch (widget.type) {
-    case 'clock':     return <ClockWidget />;
+    case 'clock':     return <ClockWidget widgetId={widget.id} />;
     case 'calendar':  return <CalendarWidget />;
     case 'weather':   return <WeatherWidget />;
-    case 'search':    return <SearchWidget />;
+    case 'search':    return <SearchWidget widgetId={widget.id} />;
+    case 'greeting':  return <GreetingWidget widgetId={widget.id} userName={currentUser?.name} />;
     case 'notes':     return <NotesWidget widgetId={widget.id} />;
     case 'quotes':    return <QuotesWidget />;
     case 'tasks':     return <TasksWidget tasks={tasks} />;
-    case 'bookmarks': return <BookmarksWidget bookmarks={bookmarks} widgetId={widget.id} />;
+    case 'bookmarks': return <BookmarksWidget bookmarks={bookmarks} widgetId={widget.id} config={widget.config} />;
     case 'countdown': return <CountdownWidget widgetId={widget.id} />;
     case 'stocks':    return <StocksWidget />;
     default:          return null;
@@ -46,17 +49,56 @@ const WidgetCanvas: React.FC<WidgetCanvasProps> = ({
   isEditing,
   setIsEditing,
   isPanelOpen,
-  setIsPanelOpen
+  setIsPanelOpen,
+  currentUser
 }) => {
   const storageKey = `${STORAGE_KEY}_${pageId}`;
   const [widgets, setWidgets] = useState<PlacedWidget[]>(() => {
-    try { return JSON.parse(localStorage.getItem(storageKey) ?? '[]'); } catch { return []; }
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error('Failed to parse saved widgets layout:', e);
+    }
+
+    // If no saved layout and this is the main dashboard, return the centered Clock, Greeting and Search widgets
+    if (pageId === 'dashboard') {
+      const width = typeof window !== 'undefined' ? window.innerWidth : 1200;
+      return [
+        {
+          id: 'default_clock',
+          type: 'clock',
+          x: Math.max(0, Math.round((width - 400) / 2)),
+          y: 140,
+          w: 400,
+          h: 130
+        },
+        {
+          id: 'default_greeting',
+          type: 'greeting',
+          x: Math.max(0, Math.round((width - 500) / 2)),
+          y: 280,
+          w: 500,
+          h: 100
+        },
+        {
+          id: 'default_search',
+          type: 'search',
+          x: Math.max(0, Math.round((width - 520) / 2)),
+          y: 390,
+          w: 520,
+          h: 56
+        }
+      ];
+    }
+    return [];
   });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeMoreMenu, setActiveMoreMenu] = useState<string | null>(null);
   const [panelSearch, setPanelSearch] = useState('');
   const [showPanelSearch, setShowPanelSearch] = useState(false);
-  const [sidebarTab, setSidebarTab] = useState<'widgets' | 'recent_tabs'>('widgets');
+  const [expandedItem, setExpandedItem] = useState<string | null>(null);
+
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ widgetId: string; ox: number; oy: number; wx: number; wy: number } | null>(null);
@@ -87,7 +129,7 @@ const WidgetCanvas: React.FC<WidgetCanvasProps> = ({
     localStorage.setItem(storageKey, JSON.stringify(updated));
   }, [storageKey]);
 
-  const addWidget = (type: WidgetType) => {
+  const addWidget = (type: WidgetType, config?: Record<string, unknown>) => {
     const catalog = WIDGET_CATALOG.find(c => c.type === type)!;
     const canvas = canvasRef.current;
     const cx = canvas ? (canvas.clientWidth / 2 - catalog.defaultW / 2) : 60;
@@ -97,6 +139,7 @@ const WidgetCanvas: React.FC<WidgetCanvasProps> = ({
       x: snapToGrid(Math.max(0, cx)),
       y: snapToGrid(Math.max(0, cy)),
       w: catalog.defaultW, h: catalog.defaultH,
+      config
     };
     save([...widgets, newWidget]);
     setIsPanelOpen(false);
@@ -160,19 +203,24 @@ const WidgetCanvas: React.FC<WidgetCanvasProps> = ({
   }, [widgets, storageKey]);
 
   // ── DRAG-FROM-PANEL ──────────────────────────────────────────────────────
-  const onPanelDragStart = (e: React.DragEvent, type: WidgetType) => {
+  const onPanelDragStart = (e: React.DragEvent, type: WidgetType, config?: Record<string, unknown>) => {
     e.dataTransfer.setData('widget-type', type);
+    if (config) {
+      e.dataTransfer.setData('widget-config', JSON.stringify(config));
+    }
   };
 
   const onCanvasDrop = (e: React.DragEvent) => {
     e.preventDefault();
     const type = e.dataTransfer.getData('widget-type') as WidgetType;
     if (!type) return;
+    const configStr = e.dataTransfer.getData('widget-config');
+    const config = configStr ? JSON.parse(configStr) : undefined;
     const catalog = WIDGET_CATALOG.find(c => c.type === type)!;
     const rect = canvasRef.current!.getBoundingClientRect();
     const x = snapToGrid(Math.max(0, e.clientX - rect.left - catalog.defaultW / 2));
     const y = snapToGrid(Math.max(0, e.clientY - rect.top - catalog.defaultH / 2));
-    save([...widgets, { id: `w_${Date.now()}`, type, x, y, w: catalog.defaultW, h: catalog.defaultH }]);
+    save([...widgets, { id: `w_${Date.now()}`, type, x, y, w: catalog.defaultW, h: catalog.defaultH, config }]);
   };
 
   const onCanvasDragOver = (e: React.DragEvent) => { e.preventDefault(); };
@@ -182,7 +230,7 @@ const WidgetCanvas: React.FC<WidgetCanvasProps> = ({
       {/* ── CANVAS ── */}
       <div
         ref={canvasRef}
-        className={`wc-canvas ${isEditing ? 'editing' : ''}`}
+        className={`wc-canvas ${isEditing || isPanelOpen ? 'editing' : ''}`}
         onClick={() => { setSelectedId(null); setActiveMoreMenu(null); }}
         onDrop={onCanvasDrop}
         onDragOver={onCanvasDragOver}
@@ -190,17 +238,48 @@ const WidgetCanvas: React.FC<WidgetCanvasProps> = ({
         {widgets.map(widget => {
           const isSelected = selectedId === widget.id;
 
+          // Check if widget is near screen edges to prevent controls/dropdowns from cutting off
+          const isNearBottom = widget.y + widget.h > (typeof window !== 'undefined' ? window.innerHeight : 800) - 80;
+          const isNearTop = widget.y < 100;
+          const isNearLeft = widget.x < 100;
+
+          const controlBarStyle: React.CSSProperties = isNearBottom
+            ? { top: '-42px', bottom: 'auto' }
+            : { bottom: '-42px', top: 'auto' };
+
+          const dropdownStyle: React.CSSProperties = {
+            position: 'absolute',
+            right: isNearLeft ? 'auto' : '0',
+            left: isNearLeft ? '0' : 'auto',
+            zIndex: 10000,
+          };
+
+          if (isNearBottom) {
+            // Control bar is at the top, so dropdown should open downwards
+            dropdownStyle.top = '34px';
+            dropdownStyle.bottom = 'auto';
+          } else {
+            // Control bar is at the bottom
+            if (isNearTop) {
+              dropdownStyle.top = '34px';
+              dropdownStyle.bottom = 'auto';
+            } else {
+              dropdownStyle.bottom = '34px';
+              dropdownStyle.top = 'auto';
+            }
+          }
+
           return (
             <div
               key={widget.id}
-              className={`wc-widget ${widget.type === 'bookmarks' ? 'transparent-widget' : ''} ${isEditing ? 'editable' : ''} ${isSelected && isEditing ? 'selected' : ''}`}
+              className={`wc-widget ${['bookmarks', 'clock', 'greeting', 'search'].includes(widget.type) ? 'transparent-widget' : ''} ${isEditing ? 'editable' : ''} ${isSelected && isEditing ? 'selected' : ''}`}
               style={{ left: widget.x, top: widget.y, width: widget.w, height: widget.h }}
               onMouseDown={e => onDragStart(e, widget.id)}
               onClick={e => { e.stopPropagation(); if (isEditing) setSelectedId(widget.id); }}
             >
               {/* Widget content */}
               <div className="wc-widget-body">
-                <WidgetContent widget={widget} tasks={tasks} bookmarks={bookmarks} />
+                <WidgetContent widget={widget} tasks={tasks} bookmarks={bookmarks} currentUser={currentUser} />
               </div>
 
               {/* Resize helper text */}
@@ -215,7 +294,12 @@ const WidgetCanvas: React.FC<WidgetCanvasProps> = ({
 
               {/* FLOATING CONTROL BAR */}
               {isSelected && isEditing && (
-                <div className="wc-control-bar" onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
+                <div 
+                  className="wc-control-bar" 
+                  style={controlBarStyle}
+                  onMouseDown={e => e.stopPropagation()} 
+                  onClick={e => e.stopPropagation()}
+                >
                   {/* Configure */}
                   <button 
                     className="wc-ctrl-btn" 
@@ -270,7 +354,7 @@ const WidgetCanvas: React.FC<WidgetCanvasProps> = ({
                     </button>
 
                     {activeMoreMenu === widget.id && (
-                      <div className="wc-more-dropdown">
+                      <div className="wc-more-dropdown" style={dropdownStyle}>
                         <button className="wc-dropdown-item" onClick={() => { removeWidget(widget.id); }}>
                           <span style={{ marginRight: 8 }}>🗑</span> REMOVE
                         </button>
@@ -321,7 +405,7 @@ const WidgetCanvas: React.FC<WidgetCanvasProps> = ({
       </div>
 
       {/* ── WIDGET PANEL (DRAG & DROP WIDGETS) ── */}
-      {isPanelOpen && (
+      {isPanelOpen && createPortal(
         <div className="wc-panel" onClick={e => e.stopPropagation()}>
           <div className="wc-panel-header">
             <span>Dashboard Customization</span>
@@ -332,254 +416,103 @@ const WidgetCanvas: React.FC<WidgetCanvasProps> = ({
             </button>
           </div>
 
-          {/* Sidebar Tabs */}
-          <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.06)', margin: '0 16px 12px', paddingBottom: '2px' }}>
-            <button 
-              onClick={() => setSidebarTab('widgets')}
-              style={{
-                flex: 1, padding: '8px 0', background: 'none', border: 'none',
-                borderBottom: sidebarTab === 'widgets' ? '2px solid #ecc94b' : '2px solid transparent',
-                color: sidebarTab === 'widgets' ? '#fff' : 'rgba(255,255,255,0.4)',
-                fontWeight: 600, fontSize: '12px', cursor: 'pointer', transition: 'all 0.15s',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
-              }}
-            >
-              <span>⚙️</span> Widgets
-            </button>
-            <button 
-              onClick={() => setSidebarTab('recent_tabs')}
-              style={{
-                flex: 1, padding: '8px 0', background: 'none', border: 'none',
-                borderBottom: sidebarTab === 'recent_tabs' ? '2px solid #ecc94b' : '2px solid transparent',
-                color: sidebarTab === 'recent_tabs' ? '#fff' : 'rgba(255,255,255,0.4)',
-                fontWeight: 600, fontSize: '12px', cursor: 'pointer', transition: 'all 0.15s',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
-              }}
-            >
-              <span>🌐</span> Recent Tabs
-            </button>
-          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+            <p className="wc-panel-sub" style={{ borderBottom: 'none', padding: '0 20px 8px' }}>Click on, or drag widget icon to desired area.</p>
 
-          {sidebarTab === 'widgets' ? (
-            <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-              <p className="wc-panel-sub" style={{ borderBottom: 'none', padding: '0 20px 8px' }}>Click on, or drag widget icon to desired area.</p>
+            {showPanelSearch && (
+              <div style={{ padding: '4px 16px 10px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                <input 
+                  value={panelSearch}
+                  onChange={e => setPanelSearch(e.target.value)}
+                  placeholder="Search widgets..."
+                  style={{ width: '100%', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', padding: '6px 10px', fontSize: '12px', color: '#fff', outline: 'none' }}
+                  autoFocus
+                />
+              </div>
+            )}
 
-              {showPanelSearch && (
-                <div style={{ padding: '4px 16px 10px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                  <input 
-                    value={panelSearch}
-                    onChange={e => setPanelSearch(e.target.value)}
-                    placeholder="Search widgets..."
-                    style={{ width: '100%', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', padding: '6px 10px', fontSize: '12px', color: '#fff', outline: 'none' }}
-                    autoFocus
-                  />
-                </div>
-              )}
+            <div className="wc-panel-list" style={{ padding: '0 16px 16px' }}>
+              {WIDGET_CATALOG
+                .filter(item => item.label.toLowerCase().includes(panelSearch.toLowerCase()) || item.description.toLowerCase().includes(panelSearch.toLowerCase()))
+                .map(item => {
+                  const isExpanded = expandedItem === item.type;
+                  const hasDropdown = item.type === 'bookmarks';
+                  return (
+                    <div key={item.type} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <div
+                        className={`wc-panel-item ${isExpanded ? 'expanded' : ''}`}
+                        draggable={!hasDropdown}
+                        onDragStart={e => onPanelDragStart(e, item.type)}
+                        onClick={() => {
+                          if (hasDropdown) {
+                            setExpandedItem(isExpanded ? null : item.type);
+                          } else {
+                            addWidget(item.type);
+                          }
+                        }}
+                      >
+                        <div className="wc-panel-icon" style={{ background: item.color + '15', border: `1px solid ${item.color}33` }}>
+                          <span style={{ fontSize: '20px' }}>{item.icon}</span>
+                        </div>
+                        <div className="wc-panel-info">
+                          <div className="wc-panel-name">{item.label}</div>
+                          <div className="wc-panel-desc">{item.variants}</div>
+                        </div>
+                        <div className="wc-panel-chevron" style={{ transform: isExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
+                            <polyline points="6 9 12 15 18 9" />
+                          </svg>
+                        </div>
+                      </div>
 
-              <div className="wc-panel-list" style={{ padding: '0 16px 16px' }}>
-                {WIDGET_CATALOG
-                  .filter(item => item.label.toLowerCase().includes(panelSearch.toLowerCase()) || item.description.toLowerCase().includes(panelSearch.toLowerCase()))
-                  .map(item => (
-                    <div
-                      key={item.type}
-                      className="wc-panel-item"
-                      draggable
-                      onDragStart={e => onPanelDragStart(e, item.type)}
-                      onClick={() => addWidget(item.type)}
-                    >
-                      <div className="wc-panel-icon" style={{ background: item.color + '15', border: `1px solid ${item.color}33` }}>
-                        <span style={{ fontSize: '20px' }}>{item.icon}</span>
-                      </div>
-                      <div className="wc-panel-info">
-                        <div className="wc-panel-name">{item.label}</div>
-                        <div className="wc-panel-desc">{item.variants}</div>
-                      </div>
-                      <div className="wc-panel-chevron">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
-                          <polyline points="6 9 12 15 18 9" />
-                        </svg>
-                      </div>
+                      {isExpanded && item.type === 'bookmarks' && (
+                        <div className="wc-panel-sub-list">
+                          {[
+                            { label: 'Bookmarks List', icon: '🔖', viewMode: 'list' },
+                            { label: 'Bookmarks Icons', icon: '🔖', viewMode: 'icons' },
+                            { label: 'Top Sites', icon: '⭐', viewMode: 'top_sites' },
+                            { label: 'Recently Closed', icon: '🕒', viewMode: 'recently_closed' },
+                            { label: 'Recent & Top Sites', icon: '🔖', viewMode: 'recent_top_sites' }
+                          ].map(sub => (
+                            <div
+                              key={sub.viewMode}
+                              className="wc-panel-sub-item"
+                              draggable
+                              onDragStart={e => onPanelDragStart(e, 'bookmarks', { viewMode: sub.viewMode })}
+                              onClick={() => addWidget('bookmarks', { viewMode: sub.viewMode })}
+                            >
+                              <span className="wc-panel-sub-icon">{sub.icon}</span>
+                              <span className="wc-panel-sub-label">{sub.label}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  ))}
-              </div>
-
-              <div className="wc-panel-footer">
-                <button className="wc-footer-btn" onClick={() => setShowPanelSearch(p => !p)}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 6 }}>
-                    <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
-                  </svg>
-                  FIND WIDGET
-                </button>
-                <button className="wc-footer-btn" onClick={() => { setPanelSearch(''); setShowPanelSearch(false); }}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 6 }}>
-                    <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
-                    <rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" />
-                  </svg>
-                  ALL WIDGETS
-                </button>
-              </div>
+                  );
+                })}
             </div>
-          ) : (
-            <RecentTabsView />
-          )}
-        </div>
+
+            <div className="wc-panel-footer">
+              <button className="wc-footer-btn" onClick={() => setIsPanelOpen(false)}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 6 }}>
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+                CLOSE
+              </button>
+              <button className="wc-footer-btn" onClick={() => { setPanelSearch(''); setShowPanelSearch(false); }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 6 }}>
+                  <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
+                  <rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" />
+                </svg>
+                ALL WIDGETS
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );
 };
 
 export default WidgetCanvas;
-
-// ─── RECENT OPEN TABS SIMULATOR SOURCE ────────────────────────────────────
-const RecentTabsView: React.FC = () => {
-  const [recentTabs, setRecentTabs] = useState<Array<{ id: string; title: string; url: string }>>(() => {
-    try {
-      const saved = localStorage.getItem('synctab_recent_tabs');
-      return saved ? JSON.parse(saved) : [
-        { id: 'rt1', title: 'SyncTab - Ultimate Dashboard', url: 'https://synctab.io' },
-        { id: 'rt2', title: 'GitHub - SyncTab Repository', url: 'https://github.com/naim0018/SyncTab' },
-        { id: 'rt3', title: 'Tailwind CSS Docs - Flexbox Layout', url: 'https://tailwindcss.com/docs/flexbox' },
-        { id: 'rt4', title: 'Prisma Schema Reference & API', url: 'https://prisma.io/docs/reference' },
-        { id: 'rt5', title: 'React Documentation - Quick Start', url: 'https://react.dev' },
-        { id: 'rt6', title: 'YouTube - Lo-Fi Chill Beats', url: 'https://youtube.com' },
-      ];
-    } catch {
-      return [];
-    }
-  });
-
-  const [simTitle, setSimTitle] = useState('');
-  const [simUrl, setSimUrl] = useState('');
-
-  const saveTabs = (tabs: Array<{ id: string; title: string; url: string }>) => {
-    setRecentTabs(tabs);
-    localStorage.setItem('synctab_recent_tabs', JSON.stringify(tabs));
-  };
-
-  const handleAddSimTab = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!simUrl.trim()) return;
-    let url = simUrl.trim();
-    if (!/^https?:\/\//i.test(url)) {
-      url = 'https://' + url;
-    }
-    const title = simTitle.trim() || url.replace('https://', '').replace('http://', '').split('/')[0];
-    const newTab = { id: `rt-${Date.now()}`, title, url };
-    saveTabs([newTab, ...recentTabs]);
-    setSimTitle('');
-    setSimUrl('');
-  };
-
-  const handleDeleteTab = (id: string) => {
-    saveTabs(recentTabs.filter(t => t.id !== id));
-  };
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100% - 60px)', overflow: 'hidden' }}>
-      <p className="wc-panel-sub" style={{ borderBottom: 'none', padding: '0 20px 10px', margin: 0 }}>
-        Drag any tab below and drop it onto your Bookmarks widget on the canvas.
-      </p>
-
-      {/* Simulator Form */}
-      <form onSubmit={handleAddSimTab} style={{ padding: '4px 16px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <div style={{ fontSize: '9px', fontWeight: 600, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Simulate Open Tab</div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <input 
-            value={simTitle}
-            onChange={e => setSimTitle(e.target.value)}
-            placeholder="Title (Optional)"
-            style={{ flex: 1, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', padding: '5px 8px', fontSize: '11px', color: '#fff', outline: 'none' }}
-          />
-          <input 
-            value={simUrl}
-            onChange={e => setSimUrl(e.target.value)}
-            placeholder="google.com"
-            required
-            style={{ flex: 1.2, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', padding: '5px 8px', fontSize: '11px', color: '#fff', outline: 'none' }}
-          />
-          <button type="submit" style={{ background: '#ecc94b', border: 'none', borderRadius: '6px', color: '#1a202c', padding: '0 10px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', height: '24px' }}>
-            Add
-          </button>
-        </div>
-      </form>
-
-      {/* Tabs List */}
-      <div className="wc-panel-list" style={{ overflowY: 'auto', flex: 1, padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        {recentTabs.map(tab => (
-          <div
-            key={tab.id}
-            className="wc-recent-tab-item"
-            draggable
-            onDragStart={e => {
-              e.dataTransfer.setData('application/json', JSON.stringify({ title: tab.title, url: tab.url }));
-              e.dataTransfer.effectAllowed = 'copy';
-            }}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              padding: '8px 12px',
-              background: 'rgba(255,255,255,0.03)',
-              border: '1px solid rgba(255,255,255,0.06)',
-              borderRadius: '8px',
-              cursor: 'grab',
-              position: 'relative',
-              transition: 'all 0.15s ease',
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.background = 'rgba(255,255,255,0.06)';
-              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)';
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
-              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)';
-            }}
-          >
-            <div style={{
-              width: '24px', height: '24px', borderRadius: '4px',
-              background: 'rgba(255,255,255,0.05)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
-            }}>
-              <img 
-                src={`https://www.google.com/s2/favicons?sz=32&domain=${new URL(tab.url).hostname}`} 
-                alt="" 
-                width={14} 
-                height={14} 
-                style={{ borderRadius: '2px' }}
-                onError={e => {
-                  e.currentTarget.style.display = 'none';
-                }}
-              />
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1, paddingRight: '16px' }}>
-              <span style={{ fontSize: '11px', color: '#fff', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {tab.title}
-              </span>
-              <span style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {new URL(tab.url).hostname}
-              </span>
-            </div>
-            <button 
-              onClick={() => handleDeleteTab(tab.id)}
-              style={{
-                position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
-                background: 'none', border: 'none', color: 'rgba(255,255,255,0.3)',
-                fontSize: '11px', cursor: 'pointer', padding: 4
-              }}
-              title="Remove from list"
-              onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
-              onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.3)'}
-            >
-              ✕
-            </button>
-          </div>
-        ))}
-        {recentTabs.length === 0 && (
-          <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', textAlign: 'center', padding: '20px 0' }}>
-            No recent tabs. Add one above to simulate.
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
