@@ -2,21 +2,39 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 
 // ==================== CLOCK ====================
-export const ClockWidget: React.FC<{ widgetId?: string }> = ({ widgetId }) => {
+export const ClockWidget: React.FC<{ widgetId?: string; config?: Record<string, any> }> = ({ widgetId, config }) => {
   const [now, setNow] = useState(new Date());
-  const [is24h, setIs24h] = useState(() => localStorage.getItem('synctab-clock-format-24h') === 'true');
-  const [useSerif, setUseSerif] = useState(() => localStorage.getItem(`synctab_clock_serif_${widgetId}`) !== 'false');
+  const [is24h, setIs24h] = useState(() => {
+    if (config && config['synctab-clock-format-24h'] !== undefined) {
+      return config['synctab-clock-format-24h'] === 'true' || config['synctab-clock-format-24h'] === true;
+    }
+    return localStorage.getItem('synctab-clock-format-24h') === 'true';
+  });
+  const [useSerif, setUseSerif] = useState(() => {
+    if (config && config[`synctab_clock_serif_${widgetId}`] !== undefined) {
+      return config[`synctab_clock_serif_${widgetId}`] !== 'false' && config[`synctab_clock_serif_${widgetId}`] !== false;
+    }
+    return localStorage.getItem(`synctab_clock_serif_${widgetId}`) !== 'false';
+  });
   const [isConfiguring, setIsConfiguring] = useState(false);
 
   useEffect(() => {
     const t = setInterval(() => {
       setNow(new Date());
-      if (!isConfiguring) {
-        setIs24h(localStorage.getItem('synctab-clock-format-24h') === 'true');
-      }
     }, 1000);
     return () => clearInterval(t);
-  }, [isConfiguring]);
+  }, []);
+
+  useEffect(() => {
+    if (config) {
+      if (config['synctab-clock-format-24h'] !== undefined) {
+        setIs24h(config['synctab-clock-format-24h'] === 'true' || config['synctab-clock-format-24h'] === true);
+      }
+      if (config[`synctab_clock_serif_${widgetId}`] !== undefined) {
+        setUseSerif(config[`synctab_clock_serif_${widgetId}`] !== 'false' && config[`synctab_clock_serif_${widgetId}`] !== false);
+      }
+    }
+  }, [config, widgetId]);
 
   useEffect(() => {
     if (!widgetId) return;
@@ -34,6 +52,7 @@ export const ClockWidget: React.FC<{ widgetId?: string }> = ({ widgetId }) => {
     localStorage.setItem('synctab-clock-format-24h', String(is24h));
     localStorage.setItem(`synctab_clock_serif_${widgetId}`, String(useSerif));
     window.dispatchEvent(new Event('storage'));
+    window.dispatchEvent(new Event('synctab-widgets-sync'));
     setIsConfiguring(false);
   };
 
@@ -95,9 +114,14 @@ export const ClockWidget: React.FC<{ widgetId?: string }> = ({ widgetId }) => {
 };
 
 // ==================== GREETING ====================
-export const GreetingWidget: React.FC<{ widgetId?: string; userName?: string }> = ({ widgetId, userName }) => {
+export const GreetingWidget: React.FC<{ widgetId?: string; userName?: string; config?: Record<string, any> }> = ({ widgetId, userName, config }) => {
   const [now, setNow] = useState(new Date());
-  const [customGreeting, setCustomGreeting] = useState(() => localStorage.getItem('synctab-custom-greeting') || '');
+  const [customGreeting, setCustomGreeting] = useState(() => {
+    if (config && config['synctab-custom-greeting'] !== undefined) {
+      return config['synctab-custom-greeting'];
+    }
+    return localStorage.getItem('synctab-custom-greeting') || '';
+  });
   const [tempGreeting, setTempGreeting] = useState(customGreeting);
   const [isConfiguring, setIsConfiguring] = useState(false);
 
@@ -107,6 +131,13 @@ export const GreetingWidget: React.FC<{ widgetId?: string; userName?: string }> 
     }, 1000);
     return () => clearInterval(t);
   }, []);
+
+  useEffect(() => {
+    if (config && config['synctab-custom-greeting'] !== undefined) {
+      setCustomGreeting(config['synctab-custom-greeting']);
+      setTempGreeting(config['synctab-custom-greeting']);
+    }
+  }, [config]);
 
   useEffect(() => {
     if (!widgetId) return;
@@ -124,6 +155,7 @@ export const GreetingWidget: React.FC<{ widgetId?: string; userName?: string }> 
     localStorage.setItem('synctab-custom-greeting', tempGreeting);
     setCustomGreeting(tempGreeting);
     window.dispatchEvent(new Event('storage'));
+    window.dispatchEvent(new Event('synctab-widgets-sync'));
     setIsConfiguring(false);
   };
 
@@ -280,13 +312,22 @@ export const WeatherWidget: React.FC = () => {
 };
 
 // ==================== SEARCH ====================
-export const SearchWidget: React.FC<{ widgetId?: string }> = ({ widgetId }) => {
+export const SearchWidget: React.FC<{ widgetId?: string; config?: Record<string, any> }> = ({ widgetId, config }) => {
   const [q, setQ] = useState('');
   const [engine, setEngine] = useState<'google' | 'bing'>(() => {
+    if (config && config['synctab-search-engine'] !== undefined) {
+      return config['synctab-search-engine'] as 'google' | 'bing';
+    }
     return (localStorage.getItem('synctab-search-engine') as 'google' | 'bing') || 'google';
   });
   const [showEngineDropdown, setShowEngineDropdown] = useState(false);
   const [isConfiguring, setIsConfiguring] = useState(false);
+
+  useEffect(() => {
+    if (config && config['synctab-search-engine'] !== undefined) {
+      setEngine(config['synctab-search-engine'] as 'google' | 'bing');
+    }
+  }, [config]);
 
   useEffect(() => {
     if (!widgetId) return;
@@ -319,7 +360,7 @@ export const SearchWidget: React.FC<{ widgetId?: string }> = ({ widgetId }) => {
         <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>Default Search:</span>
         <select 
           value={engine} 
-          onChange={e => { setEngine(e.target.value as 'google' | 'bing'); localStorage.setItem('synctab-search-engine', e.target.value); }}
+          onChange={e => { setEngine(e.target.value as 'google' | 'bing'); localStorage.setItem('synctab-search-engine', e.target.value); window.dispatchEvent(new Event('synctab-widgets-sync')); }}
           style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid var(--panel-border)', borderRadius: '6px', color: '#fff', padding: '4px 8px', fontSize: '11px', outline: 'none', cursor: 'pointer' }}
         >
           <option value="google" style={{ background: '#1e1e2f' }}>Google</option>
@@ -401,7 +442,7 @@ export const SearchWidget: React.FC<{ widgetId?: string }> = ({ widgetId }) => {
           }}>
             <button
               type="button"
-              onClick={() => { setEngine('google'); localStorage.setItem('synctab-search-engine', 'google'); setShowEngineDropdown(false); }}
+              onClick={() => { setEngine('google'); localStorage.setItem('synctab-search-engine', 'google'); window.dispatchEvent(new Event('synctab-widgets-sync')); setShowEngineDropdown(false); }}
               style={{ background: 'transparent', border: 'none', color: '#fff', padding: '6px 12px', fontSize: '11px', textAlign: 'left', cursor: 'pointer', borderRadius: '4px' }}
               onMouseEnter={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)'}
               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
@@ -410,7 +451,7 @@ export const SearchWidget: React.FC<{ widgetId?: string }> = ({ widgetId }) => {
             </button>
             <button
               type="button"
-              onClick={() => { setEngine('bing'); localStorage.setItem('synctab-search-engine', 'bing'); setShowEngineDropdown(false); }}
+              onClick={() => { setEngine('bing'); localStorage.setItem('synctab-search-engine', 'bing'); window.dispatchEvent(new Event('synctab-widgets-sync')); setShowEngineDropdown(false); }}
               style={{ background: 'transparent', border: 'none', color: '#fff', padding: '6px 12px', fontSize: '11px', textAlign: 'left', cursor: 'pointer', borderRadius: '4px' }}
               onMouseEnter={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)'}
               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
@@ -465,10 +506,27 @@ export const SearchWidget: React.FC<{ widgetId?: string }> = ({ widgetId }) => {
 };
 
 // ==================== NOTES ====================
-export const NotesWidget: React.FC<{ widgetId: string }> = ({ widgetId }) => {
+export const NotesWidget: React.FC<{ widgetId: string; config?: Record<string, any> }> = ({ widgetId, config }) => {
   const key = `synctab_wn_${widgetId}`;
-  const [text, setText] = useState(() => localStorage.getItem(key) ?? '');
-  const save = (v: string) => { setText(v); localStorage.setItem(key, v); };
+  const [text, setText] = useState(() => {
+    if (config && config[key] !== undefined) {
+      return config[key];
+    }
+    return localStorage.getItem(key) ?? '';
+  });
+
+  useEffect(() => {
+    if (config && config[key] !== undefined) {
+      setText(config[key]);
+    }
+  }, [config, key]);
+
+  const save = (v: string) => {
+    setText(v);
+    localStorage.setItem(key, v);
+    window.dispatchEvent(new Event('synctab-widgets-sync'));
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={{ fontSize: '9px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.8px' }}>📝 Quick Note</div>
@@ -531,16 +589,51 @@ export const BookmarksWidget: React.FC<{
   bookmarks: BookmarkItem[];
   widgetId: string;
   config?: Record<string, any>;
-}> = ({ widgetId, config }) => {
-  const [viewMode, setViewMode] = useState<'icons' | 'list' | 'top_sites' | 'recently_closed' | 'recent_top_sites'>(() => {
-    if (config && typeof config.viewMode === 'string') {
-      return config.viewMode as any;
+}> = ({ bookmarks: _bookmarks, widgetId, config }) => {
+  const [viewMode, setViewMode] = useState<'icons' | 'list'>(() => {
+    let modeVal = '';
+    if (config && typeof config[`synctab_bm_mode_${widgetId}`] === 'string') {
+      modeVal = config[`synctab_bm_mode_${widgetId}`];
+    } else if (config && typeof config.viewMode === 'string') {
+      modeVal = config.viewMode;
+    } else {
+      modeVal = localStorage.getItem(`synctab_bm_mode_${widgetId}`) || '';
     }
-    const saved = localStorage.getItem(`synctab_bm_mode_${widgetId}`);
-    return (saved as any) || 'icons';
+
+    if (['top_sites', 'recently_closed', 'recent_top_sites'].includes(modeVal)) {
+      return 'list';
+    }
+    return (modeVal as any) || 'icons';
+  });
+
+  const [dataSource, setDataSource] = useState<'custom' | 'top_sites' | 'recently_closed' | 'recent_top_sites'>(() => {
+    let sourceVal = '';
+    if (config && typeof config[`synctab_bm_source_${widgetId}`] === 'string') {
+      sourceVal = config[`synctab_bm_source_${widgetId}`];
+    } else {
+      sourceVal = localStorage.getItem(`synctab_bm_source_${widgetId}`) || '';
+    }
+
+    if (sourceVal) {
+      return sourceVal as any;
+    }
+
+    // Migration fallback based on old viewMode
+    let oldMode = '';
+    if (config && typeof config[`synctab_bm_mode_${widgetId}`] === 'string') {
+      oldMode = config[`synctab_bm_mode_${widgetId}`];
+    } else {
+      oldMode = localStorage.getItem(`synctab_bm_mode_${widgetId}`) || '';
+    }
+
+    if (['top_sites', 'recently_closed', 'recent_top_sites'].includes(oldMode)) {
+      return oldMode as any;
+    }
+    return 'custom';
   });
   const [searchQuery, setSearchQuery] = useState('');
   const [showSetupModal, setShowSetupModal] = useState(false);
+  const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
 
   const topSitesList = [
     { id: 'ts1', title: 'Google', url: 'https://google.com' },
@@ -568,6 +661,10 @@ export const BookmarksWidget: React.FC<{
     { id: 'rts4', title: 'Stack Overflow', url: 'https://stackoverflow.com' },
     { id: 'rts5', title: 'Gmail', url: 'https://mail.google.com' },
   ];
+
+  const [topSites, setTopSites] = useState<Array<{ id: string; title: string; url: string }>>(() => topSitesList);
+  const [recentlyClosed, setRecentlyClosed] = useState<Array<{ id: string; title: string; url: string }>>(() => recentlyClosedList);
+  const [recentTopSites, setRecentTopSites] = useState<Array<{ id: string; title: string; url: string }>>(() => recentTopSitesList);
 
   const [openTabs, setOpenTabs] = useState<Array<{ title: string; url: string }>>(() => {
     try {
@@ -638,11 +735,127 @@ export const BookmarksWidget: React.FC<{
     }
   }, []);
 
-  useEffect(() => {
-    // Query initially
-    refreshOpenTabs();
+  const refreshTopSites = useCallback(() => {
+    try {
+      if (typeof window !== 'undefined' && (window as any).chrome) {
+        console.log("SyncTab: [Top Sites] window.chrome properties:", Object.keys((window as any).chrome));
+        if ((window as any).chrome.runtime && typeof (window as any).chrome.runtime.getManifest === 'function') {
+          console.log("SyncTab: [Top Sites] Active manifest permissions:", (window as any).chrome.runtime.getManifest()?.permissions);
+        }
+      }
+      if (
+        typeof window !== 'undefined' &&
+        (window as any).chrome &&
+        (window as any).chrome.topSites &&
+        typeof (window as any).chrome.topSites.get === 'function'
+      ) {
+        console.log("SyncTab: [Top Sites] API detected. Querying Chrome...");
+        (window as any).chrome.topSites.get((sites: any[]) => {
+          console.log("SyncTab: [Top Sites] Chrome returned raw sites:", sites);
+          if (Array.isArray(sites)) {
+            const formatted = sites
+              .filter(s => s && s.url)
+              .map((s, index) => ({
+                id: `ts_real_${index}`,
+                title: s.title || getDomain(s.url),
+                url: s.url || ''
+              }));
+            console.log("SyncTab: [Top Sites] Formatted result list:", formatted);
+            if (formatted.length > 0) {
+              setTopSites(formatted);
+              setRecentTopSites(formatted.slice(0, 5));
+            } else {
+              console.log("SyncTab: [Top Sites] Formatted list is empty, using fallback mock data.");
+            }
+          }
+        });
+      } else {
+        console.log("SyncTab: [Top Sites] API not available. Using mock data.");
+      }
+    } catch (e) {
+      console.warn("Failed to query chrome topSites, keeping mock:", e);
+    }
+  }, []);
 
-    // Listen to real-time Chrome tab events safely
+  const refreshRecentlyClosed = useCallback(() => {
+    try {
+      if (
+        typeof window !== 'undefined' &&
+        (window as any).chrome &&
+        (window as any).chrome.sessions &&
+        typeof (window as any).chrome.sessions.getRecentlyClosed === 'function'
+      ) {
+        console.log("SyncTab: [Recently Closed] Sessions API detected. Querying Chrome...");
+        (window as any).chrome.sessions.getRecentlyClosed({ maxResults: 15 }, (sessions: any[]) => {
+          console.log("SyncTab: [Recently Closed] Chrome returned raw sessions:", sessions);
+          if (Array.isArray(sessions)) {
+            const items: Array<{ id: string; title: string; url: string }> = [];
+            sessions.forEach((s, index) => {
+              if (s.tab && s.tab.url) {
+                items.push({
+                  id: `rc_real_t_${index}`,
+                  title: s.tab.title || getDomain(s.tab.url),
+                  url: s.tab.url
+                });
+              } else if (s.window && Array.isArray(s.window.tabs)) {
+                s.window.tabs.forEach((t: any, tIdx: number) => {
+                  if (t && t.url) {
+                    items.push({
+                      id: `rc_real_w_${index}_${tIdx}`,
+                      title: t.title || getDomain(t.url),
+                      url: t.url
+                    });
+                  }
+                });
+              }
+            });
+            console.log("SyncTab: [Recently Closed] Formatted list:", items);
+            if (items.length > 0) {
+              setRecentlyClosed(items);
+            } else {
+              console.log("SyncTab: [Recently Closed] Formatted list is empty, using fallback mock data.");
+            }
+          }
+        });
+      } else {
+        console.log("SyncTab: [Recently Closed] Sessions API not available. Using mock data.");
+      }
+    } catch (e) {
+      console.warn("Failed to query chrome recently closed, keeping mock:", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshTopSites();
+    refreshRecentlyClosed();
+
+    try {
+      if (
+        typeof window !== 'undefined' &&
+        (window as any).chrome &&
+        (window as any).chrome.sessions &&
+        (window as any).chrome.sessions.onChanged
+      ) {
+        const sessionsAPI = (window as any).chrome.sessions;
+        const listener = () => {
+          refreshRecentlyClosed();
+        };
+        if (sessionsAPI.onChanged.addListener) {
+          sessionsAPI.onChanged.addListener(listener);
+        }
+        return () => {
+          try {
+            sessionsAPI.onChanged.removeListener(listener);
+          } catch {}
+        };
+      }
+    } catch (e) {
+      console.warn("Failed to set up chrome sessions event listeners:", e);
+    }
+  }, [refreshTopSites, refreshRecentlyClosed]);
+
+  useEffect(() => {
+    refreshOpenTabs();
     try {
       const hasChromeTabs = typeof window !== 'undefined' && 
                             (window as any).chrome && 
@@ -692,29 +905,70 @@ export const BookmarksWidget: React.FC<{
     if (localBookmarks.some(b => b.url === tab.url)) return;
     const newBm = {
       id: `bm_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-      title: tab.title.replace(/^\(\d+\)\s*/, ''), // strip notifications like (1) or (4)
-      url: tab.url
+      title: tab.title.replace(/^\(\d+\)\s*/, ''),
+      url: tab.url,
+      icon: undefined
     };
     saveLocalBookmarks([...localBookmarks, newBm]);
   };
 
   const [isDragOver, setIsDragOver] = useState(false);
 
-  // Modal options (mocked for visual fidelity with the reference image)
-  const [searchInBm, setSearchInBm] = useState('Disabled');
-  const [showCount, setShowCount] = useState(true);
-  const [appendTopSites, setAppendTopSites] = useState<'yes' | 'folder' | 'no'>('no');
-  const [appendRecent, setAppendRecent] = useState<'yes' | 'folder' | 'no'>('no');
-  const [powerListTitle, setPowerListTitle] = useState('');
-  const [powerOpenNewTab, setPowerOpenNewTab] = useState(false);
-  const [powerAllowChangeIcons, setPowerAllowChangeIcons] = useState(false);
+  // Modal options
+  const [searchInBm, setSearchInBm] = useState(() => {
+    if (config && typeof config[`synctab_bm_search_${widgetId}`] === 'string') {
+      return config[`synctab_bm_search_${widgetId}`];
+    }
+    return localStorage.getItem(`synctab_bm_search_${widgetId}`) || 'Disabled';
+  });
+  const [showCount, setShowCount] = useState(() => {
+    if (config && config[`synctab_bm_show_count_${widgetId}`] !== undefined) {
+      return config[`synctab_bm_show_count_${widgetId}`] === 'true' || config[`synctab_bm_show_count_${widgetId}`] === true;
+    }
+    const saved = localStorage.getItem(`synctab_bm_show_count_${widgetId}`);
+    return saved !== null ? saved === 'true' : true;
+  });
+  const [appendTopSites, setAppendTopSites] = useState<'yes' | 'folder' | 'no'>(() => {
+    if (config && typeof config[`synctab_bm_append_top_${widgetId}`] === 'string') {
+      return config[`synctab_bm_append_top_${widgetId}`] as any;
+    }
+    return (localStorage.getItem(`synctab_bm_append_top_${widgetId}`) as any) || 'no';
+  });
+  const [appendRecent, setAppendRecent] = useState<'yes' | 'folder' | 'no'>(() => {
+    if (config && typeof config[`synctab_bm_append_recent_${widgetId}`] === 'string') {
+      return config[`synctab_bm_append_recent_${widgetId}`] as any;
+    }
+    return (localStorage.getItem(`synctab_bm_append_recent_${widgetId}`) as any) || 'no';
+  });
+  const [powerListTitle, setPowerListTitle] = useState(() => {
+    if (config && typeof config[`synctab_bm_power_title_${widgetId}`] === 'string') {
+      return config[`synctab_bm_power_title_${widgetId}`];
+    }
+    return localStorage.getItem(`synctab_bm_power_title_${widgetId}`) || '';
+  });
+  const [powerOpenNewTab, setPowerOpenNewTab] = useState(() => {
+    if (config && config[`synctab_bm_power_new_tab_${widgetId}`] !== undefined) {
+      return config[`synctab_bm_power_new_tab_${widgetId}`] === 'true' || config[`synctab_bm_power_new_tab_${widgetId}`] === true;
+    }
+    return localStorage.getItem(`synctab_bm_power_new_tab_${widgetId}`) === 'true';
+  });
+  const [powerAllowChangeIcons, setPowerAllowChangeIcons] = useState(() => {
+    if (config && config[`synctab_bm_power_allow_change_icons_${widgetId}`] !== undefined) {
+      return config[`synctab_bm_power_allow_change_icons_${widgetId}`] === 'true' || config[`synctab_bm_power_allow_change_icons_${widgetId}`] === true;
+    }
+    return localStorage.getItem(`synctab_bm_power_allow_change_icons_${widgetId}`) === 'true';
+  });
 
   // For adding a new bookmark inside the modal
   const [newTitle, setNewTitle] = useState('');
   const [newUrl, setNewUrl] = useState('');
+  const [newIcon, setNewIcon] = useState('');
 
   // Local bookmarks storage for this specific widget instance
-  const [localBookmarks, setLocalBookmarks] = useState<Array<{ id: string; title: string; url: string }>>(() => {
+  const [localBookmarks, setLocalBookmarks] = useState<Array<{ id: string; title: string; url: string; icon?: string }>>(() => {
+    if (config && config[`synctab_widget_bookmarks_${widgetId}`] !== undefined) {
+      return config[`synctab_widget_bookmarks_${widgetId}`] || [];
+    }
     try {
       const saved = localStorage.getItem(`synctab_widget_bookmarks_${widgetId}`);
       if (saved) return JSON.parse(saved);
@@ -731,9 +985,75 @@ export const BookmarksWidget: React.FC<{
     ];
   });
 
-  const saveLocalBookmarks = (newBms: Array<{ id: string; title: string; url: string }>) => {
+  // Listen to configuration updates from the database
+  useEffect(() => {
+    if (config) {
+      if (config[`synctab_bm_mode_${widgetId}`] !== undefined) {
+        const mode = config[`synctab_bm_mode_${widgetId}`];
+        if (['top_sites', 'recently_closed', 'recent_top_sites'].includes(mode)) {
+          setViewMode('list');
+        } else {
+          setViewMode(mode as any);
+        }
+      } else if (config.viewMode !== undefined) {
+        const mode = config.viewMode;
+        if (['top_sites', 'recently_closed', 'recent_top_sites'].includes(mode)) {
+          setViewMode('list');
+        } else {
+          setViewMode(mode as any);
+        }
+      }
+      if (config[`synctab_bm_source_${widgetId}`] !== undefined) {
+        setDataSource(config[`synctab_bm_source_${widgetId}`] as any);
+      }
+      if (config[`synctab_bm_search_${widgetId}`] !== undefined) {
+        setSearchInBm(config[`synctab_bm_search_${widgetId}`] || 'Disabled');
+      }
+      if (config[`synctab_bm_show_count_${widgetId}`] !== undefined) {
+        setShowCount(config[`synctab_bm_show_count_${widgetId}`] === 'true' || config[`synctab_bm_show_count_${widgetId}`] === true);
+      }
+      if (config[`synctab_bm_append_top_${widgetId}`] !== undefined) {
+        setAppendTopSites(config[`synctab_bm_append_top_${widgetId}`] || 'no');
+      }
+      if (config[`synctab_bm_append_recent_${widgetId}`] !== undefined) {
+        setAppendRecent(config[`synctab_bm_append_recent_${widgetId}`] || 'no');
+      }
+      if (config[`synctab_bm_power_title_${widgetId}`] !== undefined) {
+        setPowerListTitle(config[`synctab_bm_power_title_${widgetId}`] || '');
+      }
+      if (config[`synctab_bm_power_new_tab_${widgetId}`] !== undefined) {
+        setPowerOpenNewTab(config[`synctab_bm_power_new_tab_${widgetId}`] === 'true' || config[`synctab_bm_power_new_tab_${widgetId}`] === true);
+      }
+      if (config[`synctab_bm_power_allow_change_icons_${widgetId}`] !== undefined) {
+        setPowerAllowChangeIcons(config[`synctab_bm_power_allow_change_icons_${widgetId}`] === 'true' || config[`synctab_bm_power_allow_change_icons_${widgetId}`] === true);
+      }
+      if (config[`synctab_widget_bookmarks_${widgetId}`] !== undefined) {
+        setLocalBookmarks(config[`synctab_widget_bookmarks_${widgetId}`] || []);
+      }
+      
+      // Write to localStorage if key is not yet set (e.g. newly created widget from panel)
+      const modeKey = `synctab_bm_mode_${widgetId}`;
+      if (config.viewMode !== undefined && !localStorage.getItem(modeKey)) {
+        const mode = config.viewMode;
+        if (['top_sites', 'recently_closed', 'recent_top_sites'].includes(mode)) {
+          localStorage.setItem(modeKey, 'list');
+        } else {
+          localStorage.setItem(modeKey, String(mode));
+        }
+        window.dispatchEvent(new Event('synctab-widgets-sync'));
+      }
+      const sourceKey = `synctab_bm_source_${widgetId}`;
+      if (config.viewMode !== undefined && ['top_sites', 'recently_closed', 'recent_top_sites'].includes(config.viewMode) && !localStorage.getItem(sourceKey)) {
+        localStorage.setItem(sourceKey, String(config.viewMode));
+        window.dispatchEvent(new Event('synctab-widgets-sync'));
+      }
+    }
+  }, [config, widgetId]);
+
+  const saveLocalBookmarks = (newBms: Array<{ id: string; title: string; url: string; icon?: string }>) => {
     setLocalBookmarks(newBms);
     localStorage.setItem(`synctab_widget_bookmarks_${widgetId}`, JSON.stringify(newBms));
+    window.dispatchEvent(new Event('synctab-widgets-sync'));
   };
 
   // Top sites & Recents storage
@@ -750,7 +1070,7 @@ export const BookmarksWidget: React.FC<{
     localStorage.setItem('synctab_bm_clicks', JSON.stringify(nextCounts));
 
     const filtered = recentSites.filter(x => x.url !== item.url);
-    const nextRecents = [{ id: item.id, title: item.title, url: item.url, category: 'Work', isShared: false, userId: '' }, ...filtered].slice(0, 12);
+    const nextRecents = [{ id: item.id, title: item.title, url: item.url }, ...filtered].slice(0, 12);
     setRecentSites(nextRecents);
     localStorage.setItem('synctab_bm_recents', JSON.stringify(nextRecents));
   };
@@ -771,10 +1091,11 @@ export const BookmarksWidget: React.FC<{
       url = 'https://' + url;
     }
     const title = newTitle.trim() || getDomain(url);
-    const newBm = { id: `bm-${Date.now()}`, title, url };
+    const newBm = { id: `bm-${Date.now()}`, title, url, icon: newIcon.trim() || undefined };
     saveLocalBookmarks([...localBookmarks, newBm]);
     setNewTitle('');
     setNewUrl('');
+    setNewIcon('');
   };
 
   const handleDeleteBookmark = (bookmarkId: string) => {
@@ -810,6 +1131,7 @@ export const BookmarksWidget: React.FC<{
         id: `bm-${Date.now()}`,
         title: title?.trim() || getDomain(formattedUrl),
         url: formattedUrl,
+        icon: undefined
       };
       saveLocalBookmarks([...localBookmarks, newBm]);
     } catch (err) {
@@ -828,15 +1150,90 @@ export const BookmarksWidget: React.FC<{
     return () => window.removeEventListener(`synctab-configure-${widgetId}`, handleConfig);
   }, [widgetId]);
 
-  // Filtered bookmarks for list search
-  const filteredBookmarks = localBookmarks.filter(b => 
-    b.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    b.url.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
   const handleSave = () => {
     localStorage.setItem(`synctab_bm_mode_${widgetId}`, viewMode);
+    localStorage.setItem(`synctab_bm_source_${widgetId}`, dataSource);
+    localStorage.setItem(`synctab_bm_search_${widgetId}`, searchInBm);
+    localStorage.setItem(`synctab_bm_show_count_${widgetId}`, String(showCount));
+    localStorage.setItem(`synctab_bm_append_top_${widgetId}`, appendTopSites);
+    localStorage.setItem(`synctab_bm_append_recent_${widgetId}`, appendRecent);
+    localStorage.setItem(`synctab_bm_power_title_${widgetId}`, powerListTitle);
+    localStorage.setItem(`synctab_bm_power_new_tab_${widgetId}`, String(powerOpenNewTab));
+    localStorage.setItem(`synctab_bm_power_allow_change_icons_${widgetId}`, String(powerAllowChangeIcons));
+    localStorage.setItem(`synctab_widget_bookmarks_${widgetId}`, JSON.stringify(localBookmarks));
+
+    window.dispatchEvent(new Event('synctab-widgets-sync'));
     setShowSetupModal(false);
+  };
+
+  // Combine custom bookmarks, top sites, and recently closed depending on appends
+  const getDisplayBookmarks = () => {
+    if (activeFolderId === 'top_sites_folder') {
+      return topSites;
+    }
+    if (activeFolderId === 'recent_folder') {
+      return recentlyClosed.slice(0, 10);
+    }
+
+    let list = [...localBookmarks];
+
+    if (appendTopSites === 'folder') {
+      list.push({
+        id: 'top_sites_folder',
+        title: 'Top Sites',
+        url: '#folder_top_sites',
+        isFolder: true
+      } as any);
+    } else if (appendTopSites === 'yes') {
+      list = [...list, ...topSites];
+    }
+
+    if (appendRecent === 'folder') {
+      list.push({
+        id: 'recent_folder',
+        title: 'Recently Closed',
+        url: '#folder_recent',
+        isFolder: true
+      } as any);
+    } else if (appendRecent === 'yes') {
+      list = [...list, ...recentlyClosed.slice(0, 10)];
+    }
+
+    return list;
+  };
+
+  const getActiveItems = () => {
+    if (activeFolderId === 'top_sites_folder') {
+      return topSites;
+    }
+    if (activeFolderId === 'recent_folder') {
+      return recentlyClosed.slice(0, 10);
+    }
+
+    switch (dataSource) {
+      case 'top_sites':
+        return topSites;
+      case 'recently_closed':
+        return recentlyClosed.slice(0, 10);
+      case 'recent_top_sites':
+        return recentTopSites.slice(0, 10);
+      case 'custom':
+      default:
+        return getDisplayBookmarks();
+    }
+  };
+
+  const renderIcon = (b: { id: string; title: string; url: string; icon?: string }, size = 24) => {
+    if (b.icon) {
+      const isUrl = /^https?:\/\//i.test(b.icon) || b.icon.startsWith('/') || b.icon.startsWith('data:');
+      if (isUrl) {
+        return <img src={b.icon} alt="" width={size} height={size} style={{ borderRadius: '4px', objectFit: 'cover' }} />;
+      }
+      return <span style={{ fontSize: `${size - 4}px` }}>{b.icon}</span>;
+    }
+    return <img src={getFavicon(b.url)} alt="" width={size} height={size} style={{ borderRadius: '4px' }} onError={e => {
+      e.currentTarget.style.display = 'none';
+    }} />;
   };
 
   return (
@@ -857,73 +1254,117 @@ export const BookmarksWidget: React.FC<{
         boxSizing: 'border-box'
       }}
     >
+      {/* Optional List Title / Count Header */}
+      {(powerListTitle || showCount) && (viewMode === 'icons' || viewMode === 'list') && !activeFolderId && (
+        <div style={{ fontSize: '9px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.8px', display: 'flex', justifyContent: 'space-between', padding: '0 4px' }}>
+          <span>🔖 {powerListTitle || 'Bookmarks'}</span>
+          {showCount && <span>({localBookmarks.length})</span>}
+        </div>
+      )}
       
       {/* View Mode Content */}
-      <div style={{ overflow: 'visible' }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: '4px' }}>
         
         {/* 1. BOOKMARKS ICONS */}
         {viewMode === 'icons' && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, padding: '4px', justifyContent: 'flex-start' }}>
-            {localBookmarks.slice(0, 11).map(b => (
-              <a key={b.id} href={b.url} target="_blank" rel="noopener noreferrer" onClick={() => registerClick(b)}
+            {/* Show Back Button if in a folder */}
+            {activeFolderId && (
+              <a href="#" onClick={(e) => { e.preventDefault(); setActiveFolderId(null); }}
                 style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, textDecoration: 'none', width: '60px' }}>
                 <div style={{
                   width: '48px', height: '48px', borderRadius: '50%',
-                  background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(255,255,255,0.08)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  transition: 'all 0.2s ease',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
+                  background: 'rgba(255,255,255,0.08)', border: '1px dashed rgba(255,255,255,0.2)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff',
+                  fontSize: '18px', transition: 'all 0.2s ease',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
                 }}
-                onMouseEnter={e => { 
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.28)'; 
-                  e.currentTarget.style.transform = 'scale(1.08)'; 
-                  e.currentTarget.style.boxShadow = '0 6px 16px rgba(255,255,255,0.15)';
-                }}
-                onMouseLeave={e => { 
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.18)'; 
-                  e.currentTarget.style.transform = 'none'; 
-                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2)';
-                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.18)'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
                 >
-                  <img src={getFavicon(b.url)} alt="" width={24} height={24} style={{ borderRadius: '4px' }} onError={e => {
-                    e.currentTarget.style.display = 'none';
-                  }} />
+                  ←
                 </div>
-                <span style={{ fontSize: '11px', color: '#fff', width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'center', textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>
-                  {getDomain(b.url)}
-                </span>
+                <span style={{ fontSize: '11px', color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>Back</span>
               </a>
-            ))}
+            )}
+
+            {getActiveItems().slice(0, dataSource === 'custom' ? 11 : 12).map(b => {
+              const isFolder = (b as any).isFolder;
+              return (
+                <a 
+                  key={b.id} 
+                  href={b.url} 
+                  target={isFolder ? undefined : (powerOpenNewTab ? "_blank" : "_self")} 
+                  rel={isFolder ? undefined : "noopener noreferrer"} 
+                  onClick={(e) => {
+                    if (isFolder) {
+                      e.preventDefault();
+                      setActiveFolderId(b.id);
+                    } else {
+                      registerClick(b);
+                    }
+                  }}
+                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, textDecoration: 'none', width: '60px' }}
+                >
+                  <div style={{
+                    width: '48px', height: '48px', borderRadius: '50%',
+                    background: isFolder ? 'rgba(236, 201, 75, 0.15)' : 'rgba(255,255,255,0.18)', 
+                    border: isFolder ? '1px solid rgba(236, 201, 75, 0.3)' : '1px solid rgba(255,255,255,0.08)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    transition: 'all 0.2s ease',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
+                  }}
+                  onMouseEnter={e => { 
+                    e.currentTarget.style.background = isFolder ? 'rgba(236, 201, 75, 0.25)' : 'rgba(255,255,255,0.28)'; 
+                    e.currentTarget.style.transform = 'scale(1.08)'; 
+                    e.currentTarget.style.boxShadow = isFolder ? '0 6px 16px rgba(236, 201, 75, 0.2)' : '0 6px 16px rgba(255,255,255,0.15)';
+                  }}
+                  onMouseLeave={e => { 
+                    e.currentTarget.style.background = isFolder ? 'rgba(236, 201, 75, 0.15)' : 'rgba(255,255,255,0.18)'; 
+                    e.currentTarget.style.transform = 'none'; 
+                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2)';
+                  }}
+                  >
+                    {isFolder ? '📁' : renderIcon(b)}
+                  </div>
+                  <span style={{ fontSize: '11px', color: '#fff', width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'center', textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>
+                    {isFolder ? b.title : getDomain(b.url)}
+                  </span>
+                </a>
+              );
+            })}
             
             {/* The Plus Button to open setup modal */}
-            <button 
-              onClick={() => setShowSetupModal(true)}
-              style={{
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
-                background: 'none', border: 'none', padding: 0, cursor: 'pointer', width: '60px'
-              }}
-            >
-              <div style={{
-                width: '48px', height: '48px', borderRadius: '50%',
-                background: 'rgba(255,255,255,0.08)', border: '1px dashed rgba(255,255,255,0.2)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff',
-                fontSize: '18px', transition: 'all 0.2s ease',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.18)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.5)'; }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'; }}
+            {dataSource === 'custom' && !activeFolderId && (
+              <button 
+                onClick={() => setShowSetupModal(true)}
+                style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+                  background: 'none', border: 'none', padding: 0, cursor: 'pointer', width: '60px'
+                }}
               >
-                ＋
-              </div>
-              <span style={{ fontSize: '11px', color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>Add</span>
-            </button>
+                <div style={{
+                  width: '48px', height: '48px', borderRadius: '50%',
+                  background: 'rgba(255,255,255,0.08)', border: '1px dashed rgba(255,255,255,0.2)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff',
+                  fontSize: '18px', transition: 'all 0.2s ease',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.18)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.5)'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'; }}
+                >
+                  ＋
+                </div>
+                <span style={{ fontSize: '11px', color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>Add</span>
+              </button>
+            )}
           </div>
         )}
-
+ 
         {/* 2. BOOKMARKS LIST */}
         {viewMode === 'list' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {searchInBm === 'Enabled' && (
+            {searchInBm === 'Enabled' && !activeFolderId && (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0, marginBottom: '4px' }}>
                 <input 
                   value={searchQuery}
@@ -934,153 +1375,90 @@ export const BookmarksWidget: React.FC<{
               </div>
             )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {filteredBookmarks.map(b => (
-                <div key={b.id} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                  <a href={b.url} target="_blank" rel="noopener noreferrer" onClick={() => registerClick(b)}
-                    className="bm-list-row"
-                    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px', borderRadius: '8px', textDecoration: 'none', transition: 'all 0.2s', flex: 1, minWidth: 0 }}
-                  >
-                    <div 
-                      className="bm-list-icon-container"
-                      style={{
-                        width: '28px', height: '28px', borderRadius: '50%',
-                        background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.04)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                        transition: 'all 0.2s'
-                      }}
-                    >
-                      <img src={getFavicon(b.url)} alt="" width={16} height={16} style={{ borderRadius: '3px' }} onError={e => {
-                        e.currentTarget.style.display = 'none';
-                      }} />
+              {/* Show Back Button if in a folder */}
+              {activeFolderId && (
+                <a href="#" onClick={(e) => { e.preventDefault(); setActiveFolderId(null); }}
+                  className="bm-list-row"
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px', borderRadius: '8px', textDecoration: 'none', transition: 'all 0.2s', width: '100%', boxSizing: 'border-box' }}
+                >
+                  <div style={{
+                    width: '28px', height: '28px', borderRadius: '50%',
+                    background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.04)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
+                  }}>
+                    ←
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+                    <span style={{ fontSize: '12px', color: '#fff', fontWeight: 500 }}>Back to Main list</span>
+                  </div>
+                </a>
+              )}
+ 
+              {getActiveItems()
+                .filter(b => 
+                  activeFolderId || 
+                  b.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  b.url.toLowerCase().includes(searchQuery.toLowerCase())
+                )
+                .map(b => {
+                  const isFolder = (b as any).isFolder;
+                  return (
+                    <div key={b.id} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                      <a 
+                        href={b.url} 
+                        target={isFolder ? undefined : (powerOpenNewTab ? "_blank" : "_self")} 
+                        rel={isFolder ? undefined : "noopener noreferrer"} 
+                        onClick={(e) => {
+                          if (isFolder) {
+                            e.preventDefault();
+                            setActiveFolderId(b.id);
+                          } else {
+                            registerClick(b);
+                          }
+                        }}
+                        className="bm-list-row"
+                        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px', borderRadius: '8px', textDecoration: 'none', transition: 'all 0.2s', flex: 1, minWidth: 0 }}
+                      >
+                        <div 
+                          className="bm-list-icon-container"
+                          style={{
+                            width: '28px', height: '28px', borderRadius: '50%',
+                            background: isFolder ? 'rgba(236, 201, 75, 0.15)' : 'rgba(255,255,255,0.06)', 
+                            border: isFolder ? '1px solid rgba(236, 201, 75, 0.3)' : '1px solid rgba(255,255,255,0.04)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                            transition: 'all 0.2s'
+                          }}
+                        >
+                          {isFolder ? '📁' : renderIcon(b, 16)}
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+                          <span style={{ fontSize: '12px', color: '#fff', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>{b.title}</span>
+                          {!isFolder && <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{getDomain(b.url)}</span>}
+                        </div>
+                      </a>
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
-                      <span style={{ fontSize: '12px', color: '#fff', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>{b.title}</span>
-                      <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{getDomain(b.url)}</span>
-                    </div>
-                  </a>
-                </div>
-              ))}
-              {filteredBookmarks.length === 0 && <Msg>No matches found</Msg>}
+                  );
+                })}
+              {getActiveItems().length === 0 && <Msg>No matches found</Msg>}
             </div>
-
+ 
             {/* The Plus Button to open setup modal */}
-            <button 
-              onClick={() => setShowSetupModal(true)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                background: 'rgba(255,255,255,0.02)', border: '1px dashed rgba(255,255,255,0.12)',
-                borderRadius: '8px', padding: '8px 12px', color: 'rgba(255,255,255,0.5)',
-                fontSize: '11px', cursor: 'pointer', transition: 'all 0.2s', width: '100%',
-                justifyContent: 'center', marginTop: '4px', boxSizing: 'border-box'
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.25)'; e.currentTarget.style.color = '#fff'; }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.02)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'; e.currentTarget.style.color = 'rgba(255,255,255,0.5)'; }}
-            >
-              ＋ Add Link
-            </button>
-          </div>
-        )}
-
-        {/* 3. TOP SITES */}
-        {viewMode === 'top_sites' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(255,255,255,0.4)', display: 'flex', alignItems: 'center', gap: 6, padding: '0 4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-              <span>⭐</span> Top Sites
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, padding: '4px', justifyContent: 'flex-start' }}>
-              {topSitesList.map(b => (
-                <a key={b.id} href={b.url} target="_blank" rel="noopener noreferrer" onClick={() => registerClick(b)}
-                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, textDecoration: 'none', width: '60px' }}>
-                  <div style={{
-                    width: '48px', height: '48px', borderRadius: '50%',
-                    background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(255,255,255,0.08)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    transition: 'all 0.2s ease',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
-                  }}
-                  onMouseEnter={e => { 
-                    e.currentTarget.style.background = 'rgba(255,255,255,0.28)'; 
-                    e.currentTarget.style.transform = 'scale(1.08)'; 
-                    e.currentTarget.style.boxShadow = '0 6px 16px rgba(255,255,255,0.15)';
-                  }}
-                  onMouseLeave={e => { 
-                    e.currentTarget.style.background = 'rgba(255,255,255,0.18)'; 
-                    e.currentTarget.style.transform = 'none'; 
-                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2)';
-                  }}
-                  >
-                    <img src={getFavicon(b.url)} alt="" width={24} height={24} style={{ borderRadius: '4px' }} onError={e => {
-                      e.currentTarget.style.display = 'none';
-                    }} />
-                  </div>
-                  <span style={{ fontSize: '11px', color: '#fff', width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'center', textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>
-                    {getDomain(b.url)}
-                  </span>
-                </a>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* 4. RECENTLY CLOSED */}
-        {viewMode === 'recently_closed' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(255,255,255,0.4)', display: 'flex', alignItems: 'center', gap: 6, padding: '0 4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-              <span>🕒</span> Recently Closed
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {recentlyClosedList.map(b => (
-                <a key={b.id} href={b.url} target="_blank" rel="noopener noreferrer" onClick={() => registerClick(b)}
-                  className="bm-list-row"
-                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px', borderRadius: '8px', textDecoration: 'none', transition: 'all 0.2s' }}
-                >
-                  <div style={{
-                    width: '28px', height: '28px', borderRadius: '50%',
-                    background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.04)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
-                  }}>
-                    <img src={getFavicon(b.url)} alt="" width={16} height={16} style={{ borderRadius: '3px' }} onError={e => {
-                      e.currentTarget.style.display = 'none';
-                    }} />
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
-                    <span style={{ fontSize: '12px', color: '#fff', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.title}</span>
-                    <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{getDomain(b.url)}</span>
-                  </div>
-                </a>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* 5. RECENT & TOP SITES */}
-        {viewMode === 'recent_top_sites' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(255,255,255,0.4)', display: 'flex', alignItems: 'center', gap: 6, padding: '0 4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-              <span>🔖</span> Recent & Top Sites
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {recentTopSitesList.map(b => (
-                <a key={b.id} href={b.url} target="_blank" rel="noopener noreferrer" onClick={() => registerClick(b)}
-                  className="bm-list-row"
-                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px', borderRadius: '8px', textDecoration: 'none', transition: 'all 0.2s' }}
-                >
-                  <div style={{
-                    width: '28px', height: '28px', borderRadius: '50%',
-                    background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.04)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
-                  }}>
-                    <img src={getFavicon(b.url)} alt="" width={16} height={16} style={{ borderRadius: '3px' }} onError={e => {
-                      e.currentTarget.style.display = 'none';
-                    }} />
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
-                    <span style={{ fontSize: '12px', color: '#fff', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.title}</span>
-                    <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{getDomain(b.url)}</span>
-                  </div>
-                </a>
-              ))}
-            </div>
+            {dataSource === 'custom' && !activeFolderId && (
+              <button 
+                onClick={() => setShowSetupModal(true)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  background: 'rgba(255,255,255,0.02)', border: '1px dashed rgba(255,255,255,0.12)',
+                  borderRadius: '8px', padding: '8px 12px', color: 'rgba(255,255,255,0.5)',
+                  fontSize: '11px', cursor: 'pointer', transition: 'all 0.2s', width: '100%',
+                  justifyContent: 'center', marginTop: '4px', boxSizing: 'border-box'
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.25)'; e.currentTarget.style.color = '#fff'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.02)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'; e.currentTarget.style.color = 'rgba(255,255,255,0.5)'; }}
+              >
+                ＋ Add Link
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -1099,11 +1477,11 @@ export const BookmarksWidget: React.FC<{
               <div className="bm-modal-row">
                 <div className="bm-modal-group">
                   <div className="bm-modal-label">View as</div>
-                  <div className="bm-modal-options">
+                  <div className="bm-modal-options" style={{ display: 'flex', gap: '16px' }}>
                     <label className="bm-modal-radio-label">
                       <input 
                         type="radio" 
-                        name="viewAs" 
+                        name="viewAsFormat" 
                         checked={viewMode === 'icons'} 
                         onChange={() => setViewMode('icons')} 
                       />
@@ -1112,11 +1490,53 @@ export const BookmarksWidget: React.FC<{
                     <label className="bm-modal-radio-label">
                       <input 
                         type="radio" 
-                        name="viewAs" 
+                        name="viewAsFormat" 
                         checked={viewMode === 'list'} 
                         onChange={() => setViewMode('list')} 
                       />
                       List
+                    </label>
+                  </div>
+                </div>
+
+                <div className="bm-modal-group">
+                  <div className="bm-modal-label">Data Source</div>
+                  <div className="bm-modal-options" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 12px' }}>
+                    <label className="bm-modal-radio-label">
+                      <input 
+                        type="radio" 
+                        name="bmDataSource" 
+                        checked={dataSource === 'custom'} 
+                        onChange={() => setDataSource('custom')} 
+                      />
+                      Custom Bookmarks
+                    </label>
+                    <label className="bm-modal-radio-label">
+                      <input 
+                        type="radio" 
+                        name="bmDataSource" 
+                        checked={dataSource === 'top_sites'} 
+                        onChange={() => setDataSource('top_sites')} 
+                      />
+                      Top Sites
+                    </label>
+                    <label className="bm-modal-radio-label">
+                      <input 
+                        type="radio" 
+                        name="bmDataSource" 
+                        checked={dataSource === 'recently_closed'} 
+                        onChange={() => setDataSource('recently_closed')} 
+                      />
+                      Recently Closed
+                    </label>
+                    <label className="bm-modal-radio-label">
+                      <input 
+                        type="radio" 
+                        name="bmDataSource" 
+                        checked={dataSource === 'recent_top_sites'} 
+                        onChange={() => setDataSource('recent_top_sites')} 
+                      />
+                      Recent & Top Sites
                     </label>
                   </div>
                 </div>
@@ -1228,7 +1648,7 @@ export const BookmarksWidget: React.FC<{
 
               {/* Row 3: Add Bookmark Form */}
               <form onSubmit={handleAddBookmark} style={{ display: 'flex', gap: 10, alignItems: 'flex-end', background: 'rgba(0,0,0,0.15)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
-                <div className="bm-modal-group" style={{ flex: 1 }}>
+                <div className="bm-modal-group" style={{ flex: 1.2 }}>
                   <div className="bm-modal-label" style={{ fontSize: '9px' }}>Link Title (Optional)</div>
                   <input 
                     type="text" 
@@ -1251,6 +1671,19 @@ export const BookmarksWidget: React.FC<{
                     style={{ width: '100%' }}
                   />
                 </div>
+                {powerAllowChangeIcons && (
+                  <div className="bm-modal-group" style={{ flex: 1 }}>
+                    <div className="bm-modal-label" style={{ fontSize: '9px' }}>Icon (Emoji/URL)</div>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. ⭐ or URL" 
+                      value={newIcon} 
+                      onChange={e => setNewIcon(e.target.value)}
+                      className="bm-modal-input"
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                )}
                 <button type="submit" className="bm-modal-btn-primary" style={{ height: '32px' }}>
                   Add Link
                 </button>
@@ -1374,16 +1807,33 @@ export const BookmarksWidget: React.FC<{
   );
 };
 
-export const CountdownWidget: React.FC<{ widgetId: string }> = ({ widgetId }) => {
+export const CountdownWidget: React.FC<{ widgetId: string; config?: Record<string, any> }> = ({ widgetId, config }) => {
   const key = `synctab_countdown_${widgetId}`;
   const [targetStr, setTargetStr] = useState(() => {
+    if (config && config[key] !== undefined) {
+      return config[key];
+    }
     return localStorage.getItem(key) ?? `${new Date().getFullYear() + 1}-01-01T00:00`;
   });
   const [title, setTitle] = useState(() => {
+    if (config && config[`${key}_title`] !== undefined) {
+      return config[`${key}_title`];
+    }
     return localStorage.getItem(`${key}_title`) ?? 'New Year';
   });
   const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
   const [isConfiguring, setIsConfiguring] = useState(false);
+
+  useEffect(() => {
+    if (config) {
+      if (config[key] !== undefined) {
+        setTargetStr(config[key]);
+      }
+      if (config[`${key}_title`] !== undefined) {
+        setTitle(config[`${key}_title`]);
+      }
+    }
+  }, [config, key]);
 
   useEffect(() => {
     const updateTime = () => {
@@ -1408,6 +1858,7 @@ export const CountdownWidget: React.FC<{ widgetId: string }> = ({ widgetId }) =>
     setTargetStr(newDate);
     localStorage.setItem(`${key}_title`, newTitle);
     localStorage.setItem(key, newDate);
+    window.dispatchEvent(new Event('synctab-widgets-sync'));
     setIsConfiguring(false);
   };
 

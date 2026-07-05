@@ -9,6 +9,55 @@ import {
 } from './WidgetContents';
 import './WidgetCanvas.css';
 
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000';
+
+const getWidgetConfig = (type: string, id: string): Record<string, any> => {
+  const config: Record<string, any> = {};
+  if (type === 'clock') {
+    config['synctab-clock-format-24h'] = localStorage.getItem('synctab-clock-format-24h');
+    config[`synctab_clock_serif_${id}`] = localStorage.getItem(`synctab_clock_serif_${id}`);
+  } else if (type === 'greeting') {
+    config['synctab-custom-greeting'] = localStorage.getItem('synctab-custom-greeting');
+  } else if (type === 'search') {
+    config['synctab-search-engine'] = localStorage.getItem('synctab-search-engine');
+  } else if (type === 'notes') {
+    config[`synctab_wn_${id}`] = localStorage.getItem(`synctab_wn_${id}`);
+  } else if (type === 'countdown') {
+    config[`synctab_countdown_${id}`] = localStorage.getItem(`synctab_countdown_${id}`);
+    config[`synctab_countdown_${id}_title`] = localStorage.getItem(`synctab_countdown_${id}_title`);
+  } else if (type === 'bookmarks') {
+    config[`synctab_bm_mode_${id}`] = localStorage.getItem(`synctab_bm_mode_${id}`);
+    config[`synctab_bm_source_${id}`] = localStorage.getItem(`synctab_bm_source_${id}`);
+    config[`synctab_bm_search_${id}`] = localStorage.getItem(`synctab_bm_search_${id}`);
+    config[`synctab_bm_show_count_${id}`] = localStorage.getItem(`synctab_bm_show_count_${id}`);
+    config[`synctab_bm_append_top_${id}`] = localStorage.getItem(`synctab_bm_append_top_${id}`);
+    config[`synctab_bm_append_recent_${id}`] = localStorage.getItem(`synctab_bm_append_recent_${id}`);
+    config[`synctab_bm_power_title_${id}`] = localStorage.getItem(`synctab_bm_power_title_${id}`);
+    config[`synctab_bm_power_new_tab_${id}`] = localStorage.getItem(`synctab_bm_power_new_tab_${id}`);
+    config[`synctab_bm_power_allow_change_icons_${id}`] = localStorage.getItem(`synctab_bm_power_allow_change_icons_${id}`);
+    try {
+      const bms = localStorage.getItem(`synctab_widget_bookmarks_${id}`);
+      config[`synctab_widget_bookmarks_${id}`] = bms ? JSON.parse(bms) : null;
+    } catch {
+      config[`synctab_widget_bookmarks_${id}`] = null;
+    }
+  }
+  return config;
+};
+
+const applyWidgetConfig = (config?: Record<string, any>) => {
+  if (!config) return;
+  Object.entries(config).forEach(([key, val]) => {
+    if (val !== null && val !== undefined) {
+      if (typeof val === 'object') {
+        localStorage.setItem(key, JSON.stringify(val));
+      } else {
+        localStorage.setItem(key, String(val));
+      }
+    }
+  });
+};
+
 interface Task { id: string; title: string; status: string; priority: string; }
 interface Bookmark { id: string; title: string; url: string; }
 
@@ -20,22 +69,22 @@ interface WidgetCanvasProps {
   setIsEditing: (val: boolean) => void;
   isPanelOpen: boolean;
   setIsPanelOpen: (val: boolean | ((prev: boolean) => boolean)) => void;
-  currentUser?: { name: string; email?: string | null } | null;
+  currentUser?: { id: string; name: string; email?: string | null } | null;
 }
 
 // ─── WIDGET RENDERER ───────────────────────────────────────────────────────
-const WidgetContent: React.FC<{ widget: PlacedWidget; tasks: Task[]; bookmarks: Bookmark[]; currentUser?: { name: string; email?: string | null } | null }> = ({ widget, tasks, bookmarks, currentUser }) => {
+const WidgetContent: React.FC<{ widget: PlacedWidget; tasks: Task[]; bookmarks: Bookmark[]; currentUser?: { id: string; name: string; email?: string | null } | null }> = ({ widget, tasks, bookmarks, currentUser }) => {
   switch (widget.type) {
-    case 'clock':     return <ClockWidget widgetId={widget.id} />;
+    case 'clock':     return <ClockWidget widgetId={widget.id} config={widget.config} />;
     case 'calendar':  return <CalendarWidget />;
     case 'weather':   return <WeatherWidget />;
-    case 'search':    return <SearchWidget widgetId={widget.id} />;
-    case 'greeting':  return <GreetingWidget widgetId={widget.id} userName={currentUser?.name} />;
-    case 'notes':     return <NotesWidget widgetId={widget.id} />;
+    case 'search':    return <SearchWidget widgetId={widget.id} config={widget.config} />;
+    case 'greeting':  return <GreetingWidget widgetId={widget.id} userName={currentUser?.name} config={widget.config} />;
+    case 'notes':     return <NotesWidget widgetId={widget.id} config={widget.config} />;
     case 'quotes':    return <QuotesWidget />;
     case 'tasks':     return <TasksWidget tasks={tasks} />;
     case 'bookmarks': return <BookmarksWidget bookmarks={bookmarks} widgetId={widget.id} config={widget.config} />;
-    case 'countdown': return <CountdownWidget widgetId={widget.id} />;
+    case 'countdown': return <CountdownWidget widgetId={widget.id} config={widget.config} />;
     case 'stocks':    return <StocksWidget />;
     default:          return null;
   }
@@ -93,6 +142,11 @@ const WidgetCanvas: React.FC<WidgetCanvasProps> = ({
     }
     return [];
   });
+  const widgetsRef = useRef(widgets);
+  useEffect(() => {
+    widgetsRef.current = widgets;
+  }, [widgets]);
+
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeMoreMenu, setActiveMoreMenu] = useState<string | null>(null);
   const [panelSearch, setPanelSearch] = useState('');
@@ -102,12 +156,157 @@ const WidgetCanvas: React.FC<WidgetCanvasProps> = ({
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ widgetId: string; ox: number; oy: number; wx: number; wy: number } | null>(null);
-  const resizeRef = useRef<{ widgetId: string; sx: number; sy: number; sw: number; sh: number } | null>(null);
+  const resizeRef = useRef<{
+    widgetId: string;
+    sx: number;
+    sy: number;
+    sw: number;
+    sh: number;
+    sx_pos: number;
+    sy_pos: number;
+    dir: string;
+  } | null>(null);
 
-  // Persist on change
+  const [isLoading, setIsLoading] = useState(false);
+
+  const syncToDatabase = useCallback(async (updatedWidgets: PlacedWidget[]) => {
+    if (!currentUser || !currentUser.id) return;
+    
+    const enriched = updatedWidgets.map(w => ({
+      ...w,
+      config: getWidgetConfig(w.type, w.id)
+    }));
+
+    try {
+      const res = await fetch(`${API_BASE}/widgets/sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          userId: currentUser.id,
+          pageId,
+          widgets: enriched
+        })
+      });
+      if (!res.ok) {
+        console.error('Failed to sync widgets with database:', res.statusText);
+      }
+    } catch (err) {
+      console.error('Failed to sync widgets with database:', err);
+    }
+  }, [currentUser, pageId]);
+
+  // Load from DB or local fallback on mount/user/page change
+  useEffect(() => {
+    const loadWidgets = async () => {
+      if (!currentUser || !currentUser.id) {
+        try {
+          const saved = localStorage.getItem(storageKey);
+          if (saved) {
+            setWidgets(JSON.parse(saved));
+          }
+        } catch (e) {
+          console.error(e);
+        }
+        return;
+      }
+
+      setIsLoading(true);
+      try {
+        const res = await fetch(`${API_BASE}/widgets?userId=${currentUser.id}&pageId=${pageId}`);
+        if (res.ok) {
+          const payload = await res.json();
+          const data = payload.data || payload;
+          if (Array.isArray(data) && data.length > 0) {
+            data.forEach((w: any) => {
+              applyWidgetConfig(w.config);
+            });
+            const loadedWidgets: PlacedWidget[] = data.map((w: any) => ({
+              id: w.id,
+              type: w.type as WidgetType,
+              x: w.x,
+              y: w.y,
+              w: w.w,
+              h: w.h,
+              config: w.config
+            }));
+            setWidgets(loadedWidgets);
+            localStorage.setItem(storageKey, JSON.stringify(loadedWidgets));
+          } else {
+            const saved = localStorage.getItem(storageKey);
+            let fallbackWidgets: PlacedWidget[] = [];
+            if (saved) {
+              fallbackWidgets = JSON.parse(saved);
+            } else if (pageId === 'dashboard') {
+              const width = typeof window !== 'undefined' ? window.innerWidth : 1200;
+              fallbackWidgets = [
+                {
+                  id: 'default_clock',
+                  type: 'clock',
+                  x: Math.max(0, Math.round((width - 400) / 2)),
+                  y: 140,
+                  w: 400,
+                  h: 130
+                },
+                {
+                  id: 'default_greeting',
+                  type: 'greeting',
+                  x: Math.max(0, Math.round((width - 500) / 2)),
+                  y: 280,
+                  w: 500,
+                  h: 100
+                },
+                {
+                  id: 'default_search',
+                  type: 'search',
+                  x: Math.max(0, Math.round((width - 520) / 2)),
+                  y: 390,
+                  w: 520,
+                  h: 56
+                }
+              ];
+            }
+            setWidgets(fallbackWidgets);
+            if (fallbackWidgets.length > 0) {
+              syncToDatabase(fallbackWidgets);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load widgets from database:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadWidgets();
+  }, [currentUser, pageId, storageKey, syncToDatabase]);
+
+  // Persist on change (local storage fallback)
   useEffect(() => {
     localStorage.setItem(storageKey, JSON.stringify(widgets));
-  }, [widgets, storageKey]);
+  }, [widgets, storageKey, syncToDatabase]);
+
+  // Listen to widget config sync events
+  useEffect(() => {
+    const handleSync = () => {
+      setWidgets(prev => {
+        const updated = prev.map(w => ({
+          ...w,
+          config: getWidgetConfig(w.type, w.id)
+        }));
+        if (currentUser?.id) {
+          syncToDatabase(updated);
+        }
+        return updated;
+      });
+    };
+    window.addEventListener('synctab-widgets-sync', handleSync);
+    return () => window.removeEventListener('synctab-widgets-sync', handleSync);
+  }, [currentUser, pageId, syncToDatabase]);
+
+
 
   // Close panel/selection on Escape
   useEffect(() => {
@@ -127,7 +326,8 @@ const WidgetCanvas: React.FC<WidgetCanvasProps> = ({
   const save = useCallback((updated: PlacedWidget[]) => {
     setWidgets(updated);
     localStorage.setItem(storageKey, JSON.stringify(updated));
-  }, [storageKey]);
+    syncToDatabase(updated);
+  }, [storageKey, syncToDatabase]);
 
   const addWidget = (type: WidgetType, config?: Record<string, unknown>) => {
     const catalog = WIDGET_CATALOG.find(c => c.type === type)!;
@@ -155,27 +355,28 @@ const WidgetCanvas: React.FC<WidgetCanvasProps> = ({
   const onDragStart = (e: React.MouseEvent, widgetId: string) => {
     if (!isEditing) return;
     e.stopPropagation();
-    const w = widgets.find(x => x.id === widgetId)!;
+    const w = widgetsRef.current.find(x => x.id === widgetId)!;
     dragRef.current = { widgetId, ox: e.clientX, oy: e.clientY, wx: w.x, wy: w.y };
     setSelectedId(widgetId);
     setActiveMoreMenu(null);
   };
 
   // ── RESIZE ──────────────────────────────────────────────────────────────
-  const onResizeStart = (e: React.MouseEvent, widgetId: string) => {
+  const onResizeStart = (e: React.MouseEvent, widgetId: string, dir: string = 'se') => {
     e.stopPropagation();
     e.preventDefault();
-    const w = widgets.find(x => x.id === widgetId)!;
-    resizeRef.current = { widgetId, sx: e.clientX, sy: e.clientY, sw: w.w, sh: w.h };
+    const w = widgetsRef.current.find(x => x.id === widgetId)!;
+    resizeRef.current = { widgetId, sx: e.clientX, sy: e.clientY, sw: w.w, sh: w.h, sx_pos: w.x, sy_pos: w.y, dir };
   };
 
   // ── MOUSE MOVE / UP ─────────────────────────────────────────────────────
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
+      const currentWidgets = widgetsRef.current;
       if (dragRef.current) {
         const { widgetId, ox, oy, wx, wy } = dragRef.current;
         const canvas = canvasRef.current;
-        const wDef = widgets.find(x => x.id === widgetId)!;
+        const wDef = currentWidgets.find(x => x.id === widgetId)!;
         const maxX = canvas ? canvas.clientWidth - wDef.w : 9999;
         const maxY = canvas ? canvas.clientHeight - wDef.h : 9999;
         const nx = snapToGrid(Math.min(maxX, Math.max(0, wx + e.clientX - ox)));
@@ -183,16 +384,55 @@ const WidgetCanvas: React.FC<WidgetCanvasProps> = ({
         setWidgets(prev => prev.map(w => w.id === widgetId ? { ...w, x: nx, y: ny } : w));
       }
       if (resizeRef.current) {
-        const { widgetId, sx, sy, sw, sh } = resizeRef.current;
-        const catalog = WIDGET_CATALOG.find(c => c.type === widgets.find(x => x.id === widgetId)?.type)!;
-        const nw = snapToGrid(Math.max(catalog.minW, sw + e.clientX - sx));
-        const nh = snapToGrid(Math.max(catalog.minH, sh + e.clientY - sy));
-        setWidgets(prev => prev.map(w => w.id === widgetId ? { ...w, w: nw, h: nh } : w));
+        const { widgetId, sx, sy, sw, sh, sx_pos, sy_pos, dir } = resizeRef.current;
+        const catalog = WIDGET_CATALOG.find(c => c.type === currentWidgets.find(x => x.id === widgetId)?.type)!;
+        const canvas = canvasRef.current;
+        const maxCanvasW = canvas ? canvas.clientWidth : 9999;
+        const maxCanvasH = canvas ? canvas.clientHeight : 9999;
+
+        let nw = sw;
+        let nh = sh;
+        let nx = sx_pos;
+        let ny = sy_pos;
+
+        const dx = e.clientX - sx;
+        const dy = e.clientY - sy;
+
+        const minW = catalog.minW;
+        const minH = catalog.minH;
+
+        // Horizontal resize
+        if (dir.includes('e')) {
+          const maxW = maxCanvasW - sx_pos;
+          nw = snapToGrid(Math.min(maxW, Math.max(minW, sw + dx)));
+        } else if (dir.includes('w')) {
+          let newX = sx_pos + dx;
+          newX = snapToGrid(newX);
+          newX = Math.max(0, Math.min(sx_pos + sw - minW, newX));
+          nw = sw + (sx_pos - newX);
+          nx = newX;
+        }
+
+        // Vertical resize
+        if (dir.includes('s')) {
+          const maxH = maxCanvasH - sy_pos;
+          nh = snapToGrid(Math.min(maxH, Math.max(minH, sh + dy)));
+        } else if (dir.includes('n')) {
+          let newY = sy_pos + dy;
+          newY = snapToGrid(newY);
+          newY = Math.max(0, Math.min(sy_pos + sh - minH, newY));
+          nh = sh + (sy_pos - newY);
+          ny = newY;
+        }
+
+        setWidgets(prev => prev.map(w => w.id === widgetId ? { ...w, w: nw, h: nh, x: nx, y: ny } : w));
       }
     };
     const onUp = () => {
       if (dragRef.current || resizeRef.current) {
-        localStorage.setItem(storageKey, JSON.stringify(widgets));
+        const latest = widgetsRef.current;
+        localStorage.setItem(storageKey, JSON.stringify(latest));
+        syncToDatabase(latest);
       }
       dragRef.current = null;
       resizeRef.current = null;
@@ -200,7 +440,7 @@ const WidgetCanvas: React.FC<WidgetCanvasProps> = ({
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
-  }, [widgets, storageKey]);
+  }, [storageKey, syncToDatabase]);
 
   // ── DRAG-FROM-PANEL ──────────────────────────────────────────────────────
   const onPanelDragStart = (e: React.DragEvent, type: WidgetType, config?: Record<string, unknown>) => {
@@ -227,6 +467,27 @@ const WidgetCanvas: React.FC<WidgetCanvasProps> = ({
 
   return (
     <div className="wc-root">
+      {isLoading && (
+        <div style={{
+          position: 'absolute',
+          top: '16px',
+          right: '16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          background: 'rgba(255, 255, 255, 0.08)',
+          backdropFilter: 'blur(8px)',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          borderRadius: '20px',
+          padding: '6px 12px',
+          fontSize: '11px',
+          color: 'rgba(255, 255, 255, 0.8)',
+          zIndex: 100
+        }}>
+          <div className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse" />
+          <span>Syncing widgets...</span>
+        </div>
+      )}
       {/* ── CANVAS ── */}
       <div
         ref={canvasRef}
@@ -287,9 +548,21 @@ const WidgetCanvas: React.FC<WidgetCanvasProps> = ({
                 <div className="wc-resize-helper-text">Drag corners to resize</div>
               )}
 
-              {/* Resize handle */}
+              {/* Resize handles */}
               {isEditing && (
-                <div className="wc-resize-handle" onMouseDown={e => onResizeStart(e, widget.id)} />
+                <>
+                  {/* Edges */}
+                  <div className="wc-resize-edge wc-resize-n" onMouseDown={e => onResizeStart(e, widget.id, 'n')} />
+                  <div className="wc-resize-edge wc-resize-s" onMouseDown={e => onResizeStart(e, widget.id, 's')} />
+                  <div className="wc-resize-edge wc-resize-w" onMouseDown={e => onResizeStart(e, widget.id, 'w')} />
+                  <div className="wc-resize-edge wc-resize-e" onMouseDown={e => onResizeStart(e, widget.id, 'e')} />
+
+                  {/* Corners */}
+                  <div className="wc-resize-corner wc-resize-nw" onMouseDown={e => onResizeStart(e, widget.id, 'nw')} />
+                  <div className="wc-resize-corner wc-resize-ne" onMouseDown={e => onResizeStart(e, widget.id, 'ne')} />
+                  <div className="wc-resize-corner wc-resize-sw" onMouseDown={e => onResizeStart(e, widget.id, 'sw')} />
+                  <div className="wc-resize-corner wc-resize-se" onMouseDown={e => onResizeStart(e, widget.id, 'se')} />
+                </>
               )}
 
               {/* FLOATING CONTROL BAR */}

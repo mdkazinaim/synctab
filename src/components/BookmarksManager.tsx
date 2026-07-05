@@ -14,6 +14,8 @@ interface BookmarkItem {
   clicks: number;
   isShared: boolean;
   userId: string;
+  createdAt?: string;
+  position?: number;
 }
 
 interface BookmarksManagerProps {
@@ -422,7 +424,7 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
       const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:3000';
       const hasChrome = typeof window !== 'undefined' && (window as any).chrome && (window as any).chrome.bookmarks;
 
-      let browserBms: Array<{ title: string; url: string; folderName: string }> = [];
+      let browserBms: Array<{ title: string; url: string; folderName: string; position?: number }> = [];
 
       if (hasChrome) {
         // 1. Fetch real Chrome bookmarks tree
@@ -430,17 +432,24 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
           (window as any).chrome.bookmarks.getTree(resolve);
         });
 
+        const folderIndices: Record<string, number> = {};
         const traverse = (node: any, currentFolder = 'General') => {
           if (node.url) {
+            if (folderIndices[currentFolder] === undefined) {
+              folderIndices[currentFolder] = 0;
+            } else {
+              folderIndices[currentFolder]++;
+            }
             browserBms.push({
               title: node.title || getDomain(node.url),
               url: node.url,
-              folderName: currentFolder
+              folderName: currentFolder,
+              position: folderIndices[currentFolder]
             });
           } else {
             let nextFolder = currentFolder;
             if (node.id !== '0' && node.id !== '1' && node.id !== '2') {
-              nextFolder = node.title;
+              nextFolder = currentFolder === 'General' || currentFolder === '' ? node.title : `${currentFolder} ❯ ${node.title}`;
             }
             if (node.children) {
               for (const child of node.children) {
@@ -460,12 +469,12 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
           browserBms = JSON.parse(savedMock);
         } else {
           browserBms = [
-            { title: 'TabStack', url: 'https://github.com', folderName: 'TabStack' },
-            { title: 'QuickLinks', url: 'https://google.com', folderName: 'QuickLinks' },
-            { title: 'Vite Guide', url: 'https://vitejs.dev', folderName: 'ai' },
-            { title: 'React Docs', url: 'https://react.dev', folderName: 'dark' },
-            { title: 'Tailwind CSS', url: 'https://tailwindcss.com', folderName: 'Softvence' },
-            { title: 'Google Search', url: 'https://google.com', folderName: 'General' }
+            { title: 'TabStack', url: 'https://github.com', folderName: 'TabStack', position: 0 },
+            { title: 'QuickLinks', url: 'https://google.com', folderName: 'QuickLinks', position: 0 },
+            { title: 'Vite Guide', url: 'https://vitejs.dev', folderName: 'ai', position: 0 },
+            { title: 'React Docs', url: 'https://react.dev', folderName: 'dark', position: 0 },
+            { title: 'Tailwind CSS', url: 'https://tailwindcss.com', folderName: 'Softvence', position: 0 },
+            { title: 'Google Search', url: 'https://google.com', folderName: 'General', position: 0 }
           ];
           localStorage.setItem('synctab_mock_browser_bookmarks', JSON.stringify(browserBms));
         }
@@ -477,18 +486,18 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
         return space === selectedSpaceId;
       });
 
-      // A. Upload new bookmarks from browser to database, and update existing ones if folder/title changed
+      // A. Upload new bookmarks from browser to database, and update existing ones if folder/title/position changed
       const toUpload = browserBms.filter(bb => !dbBms.some(db => db.url === bb.url));
       const toUpdate = browserBms.map(bb => {
         const existing = dbBms.find(db => db.url === bb.url);
         if (existing) {
           const expectedCategory = `${selectedSpaceId}/${bb.folderName}`;
-          if (existing.category !== expectedCategory || existing.title !== bb.title) {
-            return { id: existing.id, title: bb.title, category: expectedCategory };
+          if (existing.category !== expectedCategory || existing.title !== bb.title || (existing as any).position !== bb.position) {
+            return { id: existing.id, title: bb.title, category: expectedCategory, position: bb.position };
           }
         }
         return null;
-      }).filter(Boolean) as Array<{ id: string; title: string; category: string }>;
+      }).filter(Boolean) as Array<{ id: string; title: string; category: string; position: number }>;
 
       // Run uploads and updates in parallel
       await Promise.all([
@@ -501,7 +510,8 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
               url: bb.url,
               category: `${selectedSpaceId}/${bb.folderName}`,
               isShared: false,
-              userId: user.id
+              userId: user.id,
+              position: bb.position ?? 0
             })
           })
         ),
@@ -511,7 +521,8 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               title: up.title,
-              category: up.category
+              category: up.category,
+              position: up.position
             })
           })
         )
@@ -526,12 +537,13 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
             const [, colName] = parseCategory(dbBm.category);
             
             let folderId = await new Promise<string>((resolve) => {
-              (window as any).chrome.bookmarks.search({ title: colName }, (results: any[]) => {
+              const actualFolderName = colName.includes(' ❯ ') ? colName.split(' ❯ ').pop()?.trim() || colName : colName;
+              (window as any).chrome.bookmarks.search({ title: actualFolderName }, (results: any[]) => {
                 const existingFolder = results.find(r => !r.url);
                 if (existingFolder) {
                   resolve(existingFolder.id);
                 } else {
-                  (window as any).chrome.bookmarks.create({ parentId: '1', title: colName }, (newFolder: any) => {
+                  (window as any).chrome.bookmarks.create({ parentId: '1', title: actualFolderName }, (newFolder: any) => {
                     resolve(newFolder.id);
                   });
                 }
@@ -564,7 +576,7 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
       // C. Update customColumns with any new folders found
       const foundFolders = Array.from(new Set(browserBms.map(bb => bb.folderName)));
       const currentCols = customColumns[selectedSpaceId] || [];
-      const mergedCols = Array.from(new Set([...currentCols, ...foundFolders, 'General']));
+      const mergedCols = Array.from(new Set([...foundFolders, ...currentCols, 'General']));
       
       const newCols = {
         ...customColumns,
@@ -975,18 +987,17 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
 
   // ─── Pointer-event based drag sort ───────────────────────────────────────
   const getOrderedIds = useCallback((colName: string): string[] => {
-    const category = `${selectedSpaceId}/${colName}`;
     const colBms = bookmarks.filter(b => {
       const [space, col] = parseCategory(b.category);
       return space === selectedSpaceId && col === colName;
     });
-    const savedOrder = localStorage.getItem('synctab_bookmark_order');
-    const orderMap = savedOrder ? JSON.parse(savedOrder) : {};
-    const orderList: string[] = orderMap[category] || [];
     const sorted = [...colBms].sort((a, b) => {
-      let ia = orderList.indexOf(a.id); let ib = orderList.indexOf(b.id);
-      if (ia === -1) ia = 999999; if (ib === -1) ib = 999999;
-      return ia - ib;
+      const posA = a.position ?? 0;
+      const posB = b.position ?? 0;
+      if (posA !== posB) return posA - posB;
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return timeA - timeB;
     });
     return sorted.map(b => b.id);
   }, [bookmarks, selectedSpaceId]);
@@ -1032,6 +1043,20 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
         orderMap[targetCategory] = newTargetOrder;
         localStorage.setItem('synctab_bookmark_order', JSON.stringify(orderMap));
       }
+
+      // Update remaining items in source column on backend
+      const sourceBms = bookmarks.filter(b => {
+        const [space, col] = parseCategory(b.category);
+        return space === selectedSpaceId && col === sourceCol && b.id !== itemId;
+      });
+      const sourceOrder = sourceBms.map(b => b.id);
+      await Promise.all(sourceOrder.map((id, index) => 
+        fetch(`${apiBase}/bookmarks/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ position: index })
+        })
+      ));
     } else {
       // Same-column reorder: persist new order
       const savedOrder = localStorage.getItem('synctab_bookmark_order');
@@ -1048,6 +1073,16 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
         }
       }
     }
+
+    // Update positions of all cards in targetCol on backend
+    await Promise.all(newTargetOrder.map((id, index) => 
+      fetch(`${apiBase}/bookmarks/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ position: index })
+      })
+    ));
+
     onRefresh();
   }, [bookmarks, selectedSpaceId, isSyncActive, onRefresh]);
 
@@ -1116,34 +1151,35 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
   };
 
 
-  // Extract all columns present in the database bookmarks for this space
-  const dbColumnsForSpace = useMemo<string[]>(() => {
+  // Get active columns for any space, combining local customColumns with database bookmark categories
+  const getActiveColumnsForSpace = useCallback((spaceId: string) => {
+    const localCols = customColumns[spaceId] || [];
+    const combined = [...localCols];
+    
+    // Extract columns present in the database bookmarks for this specific space
     const cols = new Set<string>();
     bookmarks.forEach(b => {
       const [space, col] = parseCategory(b.category);
-      if (space === selectedSpaceId && col) {
+      if (space === spaceId && col) {
         cols.add(col);
       }
     });
-    return Array.from(cols);
-  }, [bookmarks, selectedSpaceId]);
 
-  // Combine local customColumns with any columns found in the database bookmarks
-  const activeColumns = useMemo<string[]>(() => {
-    const localCols = customColumns[selectedSpaceId] || [];
-    const combined = [...localCols];
-    dbColumnsForSpace.forEach((col: string) => {
+    cols.forEach((col: string) => {
       if (!combined.includes(col)) {
         combined.push(col);
       }
     });
-    // If no columns at all, default to ['General']
+
     return combined.length > 0 ? combined : ['General'];
-  }, [customColumns, selectedSpaceId, dbColumnsForSpace]);
+  }, [customColumns, bookmarks]);
+
+  const activeColumns = useMemo<string[]>(() => {
+    return getActiveColumnsForSpace(selectedSpaceId);
+  }, [selectedSpaceId, getActiveColumnsForSpace]);
 
   // Group bookmarks by column and sort by custom order
   const columnBookmarks = activeColumns.reduce((acc: Record<string, BookmarkItem[]>, colName: string) => {
-    const category = `${selectedSpaceId}/${colName}`;
     const colList = bookmarks.filter(b => {
       const [space, col] = parseCategory(b.category);
       const matchesSpace = space === selectedSpaceId;
@@ -1154,19 +1190,14 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
       return matchesSpace && matchesCol && matchesSearch;
     });
 
-    const savedOrder = localStorage.getItem('synctab_bookmark_order');
-    const orderMap = savedOrder ? JSON.parse(savedOrder) : {};
-    const orderList = orderMap[category] || [];
-
-    if (orderList.length > 0) {
-      colList.sort((a, b) => {
-        let idxA = orderList.indexOf(a.id);
-        let idxB = orderList.indexOf(b.id);
-        if (idxA === -1) idxA = 999999;
-        if (idxB === -1) idxB = 999999;
-        return idxA - idxB;
-      });
-    }
+    colList.sort((a, b) => {
+      const posA = a.position ?? 0;
+      const posB = b.position ?? 0;
+      if (posA !== posB) return posA - posB;
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return timeA - timeB;
+    });
 
     acc[colName] = colList;
     return acc;
@@ -1369,6 +1400,11 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
                         )}
                         <span style={{ fontSize: '15px' }}>{space.icon}</span>
                         <span className="bm-mgr-space-name">{space.name}</span>
+                        {!isSidebarCollapsed && (
+                          <span style={{ marginLeft: 'auto', fontSize: '10px', fontWeight: 600, color: 'rgba(255,255,255,0.35)', background: 'rgba(255,255,255,0.07)', borderRadius: '10px', padding: '1px 6px', minWidth: '18px', textAlign: 'center', flexShrink: 0 }}>
+                            {bookmarks.filter(b => { const [sp] = parseCategory(b.category); return sp === space.id; }).length}
+                          </span>
+                        )}
                         
                         {/* Space Actions (Edit / Delete) */}
                         {!isSidebarCollapsed && (
@@ -1406,7 +1442,7 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
                     {/* Category sub-list when expanded */}
                     {!isSidebarCollapsed && !!expandedSpaces[space.id] && (
                       <div className="bm-mgr-subcategories">
-                        {(customColumns[space.id] || ['General']).map(colName => {
+                        {getActiveColumnsForSpace(space.id).map((colName, colIdx) => {
                           const isColEditing = editingColName === colName && selectedSpaceId === space.id;
 
                           return (
@@ -1448,9 +1484,12 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
                                     }
                                   }}
                                 >
-                                  <span style={{ opacity: 0.5 }}>#</span>
+                                  <span style={{ opacity: 0.4, fontSize: '10px', fontWeight: 700, minWidth: '16px', textAlign: 'right', flexShrink: 0 }}>{colIdx + 1}.</span>
                                   <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     {colName}
+                                  </span>
+                                  <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', background: 'rgba(255,255,255,0.06)', borderRadius: '8px', padding: '1px 5px', flexShrink: 0 }}>
+                                    {bookmarks.filter(b => { const [sp, col] = parseCategory(b.category); return sp === space.id && col === colName; }).length}
                                   </span>
 
                                   {/* Column Actions (Edit / Delete) */}
@@ -1783,9 +1822,9 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
                     </form>
                   )}
 
-                  {list.map((b, index) => {
+                  {list.map((b, cardIdx) => {
                     const isDragged = dragState.draggedId === b.id;
-                    const showIndicatorBefore = isDraggingOver && dragState.overIndex === index;
+                    const showIndicatorBefore = isDraggingOver && dragState.overIndex === cardIdx;
 
                     return (
                       <React.Fragment key={b.id}>
@@ -1798,6 +1837,7 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
                           onClick={() => !ghost.visible && window.open(b.url, '_blank')}
                           onPointerDown={e => onPointerDown(b.id, colName, b.title, e)}
                         >
+                          <span style={{ fontSize: '10px', fontWeight: 700, color: 'rgba(255,255,255,0.25)', minWidth: '18px', textAlign: 'right', flexShrink: 0, lineHeight: '14px' }}>{cardIdx + 1}</span>
                           <div className="bm-mgr-card-icon">
                             <img
                               src={getFavicon(b.url)}

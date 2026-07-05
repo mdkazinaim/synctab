@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import WidgetCanvas from './widgets/WidgetCanvas';
 import { BookmarksManager } from './components/BookmarksManager';
+import { IssueTracker } from './components/IssueTracker';
 import {
   Bookmark as BookmarkIcon,
   Plus,
@@ -2066,6 +2067,8 @@ function App() {
 
         {visibleTabs.chat && menuItemSides.chat === 'left' && renderMenuItem('chat', 'Chat', <MessageSquare size={20} />)}
 
+        {renderMenuItem('issues', 'Issues', <span style={{ fontSize: 18 }}>🐛</span>)}
+
         {/* Custom Pages on Left */}
         {customPages.map((page) => {
           if (menuItemSides[page.id] === 'right') return null;
@@ -2114,6 +2117,8 @@ function App() {
 
         {visibleTabs.chat && menuItemSides.chat === 'right' && renderMenuItem('chat', 'Chat', <MessageSquare size={20} />)}
 
+        {menuItemSides.issues === 'right' && renderMenuItem('issues', 'Issues', <span style={{ fontSize: 18 }}>🐛</span>)}
+
         {/* Custom Pages on Right */}
         {customPages.map((page) => {
           if (menuItemSides[page.id] !== 'right') return null;
@@ -2122,7 +2127,7 @@ function App() {
       </div>
 
       {/* Main content area */}
-      <main className="main-content">
+      <main className={`main-content ${activeTab === 'dashboard' || customPages.some(p => p.id === activeTab) ? 'dashboard-mode' : ''}`}>
         {/* Top Right Quick Widgets */}
         <div className="top-right-widgets">
           {/* Theme Toggle Button */}
@@ -2451,6 +2456,13 @@ function App() {
                 bookmarks={bookmarks} 
                 onRefresh={() => fetchBookmarks()} 
               />
+            )}
+
+            {/* B2. ISSUE TRACKER */}
+            {activeTab === 'issues' && (
+              <div style={{ height: '100%', width: '100%', display: 'flex' }}>
+                <IssueTracker />
+              </div>
             )}
 
             {/* C. DETAILED NOTES VIEW */}

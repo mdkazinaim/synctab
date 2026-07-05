@@ -140,26 +140,104 @@
   min-height: 0;
 }
 
-/* ── RESIZE HANDLE ───────────────────────────────────────────── */
-.wc-resize-handle {
-  position: absolute;
-  bottom: 0;
-  right: 0;
-  width: 22px;
-  height: 22px;
-  cursor: se-resize;
-  z-index: 10;
+.wc-widget.editable .wc-widget-body {
+  pointer-events: none;
 }
 
-.wc-resize-handle::after {
+/* ── RESIZE HANDLES ───────────────────────────────────────────── */
+.wc-resize-edge {
+  position: absolute;
+  z-index: 10;
+  background: transparent;
+  transition: background-color 0.2s;
+}
+
+.wc-resize-corner {
+  position: absolute;
+  z-index: 11;
+  background: transparent;
+  width: 12px;
+  height: 12px;
+  transition: background-color 0.2s;
+}
+
+/* Subtle edit guide on hover */
+.wc-resize-edge:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+.wc-resize-corner:hover {
+  background-color: var(--primary, #8b5cf6);
+  border-radius: 50%;
+  box-shadow: 0 0 8px var(--primary, #8b5cf6);
+}
+
+/* Edges positioning */
+.wc-resize-n {
+  top: -4px;
+  left: 6px;
+  right: 6px;
+  height: 8px;
+  cursor: n-resize;
+}
+
+.wc-resize-s {
+  bottom: -4px;
+  left: 6px;
+  right: 6px;
+  height: 8px;
+  cursor: s-resize;
+}
+
+.wc-resize-e {
+  right: -4px;
+  top: 6px;
+  bottom: 6px;
+  width: 8px;
+  cursor: e-resize;
+}
+
+.wc-resize-w {
+  left: -4px;
+  top: 6px;
+  bottom: 6px;
+  width: 8px;
+  cursor: w-resize;
+}
+
+/* Corners positioning */
+.wc-resize-nw {
+  top: -4px;
+  left: -4px;
+  cursor: nw-resize;
+}
+
+.wc-resize-ne {
+  top: -4px;
+  right: -4px;
+  cursor: ne-resize;
+}
+
+.wc-resize-sw {
+  bottom: -4px;
+  left: -4px;
+  cursor: sw-resize;
+}
+
+.wc-resize-se {
+  bottom: -4px;
+  right: -4px;
+  cursor: se-resize;
+}
+
+.wc-resize-se::after {
   content: '';
   position: absolute;
   bottom: 4px;
   right: 4px;
-  width: 10px;
-  height: 10px;
-  border-right: 2px solid rgba(255,255,255,0.3);
-  border-bottom: 2px solid rgba(255,255,255,0.3);
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid rgba(255,255,255,0.4);
+  border-bottom: 2px solid rgba(255,255,255,0.4);
   border-radius: 1px;
 }
 

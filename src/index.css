@@ -491,8 +491,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  height: calc(100vh - 120px);
-  margin-top: 40px;
+  flex: 1;
+  min-height: 0;
   background: var(--panel-bg);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
@@ -1517,6 +1517,11 @@ body {
   flex-direction: column;
 }
 
+.main-content.dashboard-mode {
+  padding: 0 120px !important;
+  overflow: hidden !important;
+}
+
 /* Split Edge Navigation Menus (Left & Right) */
 .edge-menu {
   position: fixed;
@@ -1947,8 +1952,8 @@ body {
 /* Full-Page Chat View */
 .chat-page-container {
   display: flex;
-  height: calc(100vh - 120px);
-  margin-top: 40px;
+  flex: 1;
+  min-height: 0;
   background: var(--panel-bg);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);

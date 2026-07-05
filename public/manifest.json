@@ -8,7 +8,9 @@
   },
   "permissions": [
     "bookmarks",
-    "tabs"
+    "tabs",
+    "topSites",
+    "sessions"
   ],
   "host_permissions": [
     "http://localhost:3000/*"
