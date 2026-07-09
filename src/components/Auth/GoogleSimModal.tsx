@@ -31,13 +31,15 @@ export function GoogleAuthButton({ onSuccess, onError, loading }: GoogleAuthButt
     if (listenerRef.current) window.removeEventListener('message', listenerRef.current);
 
     // Open the OAuth popup
-    const w = 520, h = 600;
-    const left = window.screenX + (window.outerWidth - w) / 2;
-    const top = window.screenY + (window.outerHeight - h) / 2;
+    const w = 520;
+    const h = 600;
+    const left = Math.round((window.screen.width ? (window.screen.width - w) / 2 : 0) + (window.screenLeft !== undefined ? window.screenLeft : window.screenX));
+    const top = Math.round((window.screen.height ? (window.screen.height - h) / 2 : 0) + (window.screenTop !== undefined ? window.screenTop : window.screenY));
+    
     const popup = window.open(
       `${API_BASE}/auth/google/login`,
       'google-oauth',
-      `width=${w},height=${h},left=${left},top=${top},toolbar=no,menubar=no`
+      `width=${w},height=${h},left=${left},top=${top},toolbar=no,menubar=no,scrollbars=yes,status=yes`
     );
 
     if (!popup) {
