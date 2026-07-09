@@ -1525,22 +1525,54 @@ body {
 /* Split Edge Navigation Menus (Left & Right) */
 .edge-menu {
   position: fixed;
-  top: 50%;
-  transform: translateY(-50%);
   z-index: 100;
+  display: flex;
+  flex-direction: column;
+  justify-content: center; /* Center items vertically */
+  align-items: center;
+  width: 96px;
+  transition: background 0.3s ease;
+}
+
+.edge-menu-items-inner {
   display: flex;
   flex-direction: column;
   gap: 24px;
   align-items: center;
-  padding: 10px;
+  max-height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  width: 100%;
+  padding: 4px 0;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.edge-menu-items-inner::-webkit-scrollbar {
+  display: none;
 }
 
 .edge-menu.left-side {
-  left: 12px;
+  left: 0;
+  top: 0;
+  height: 100vh;
+  padding: 40px 10px;
 }
 
 .edge-menu.right-side {
-  right: 12px;
+  right: 0;
+  top: 80px; /* Offset below user profile and theme switcher */
+  height: calc(100vh - 80px);
+  padding: 40px 10px;
+}
+
+.edge-menu.drag-over {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border-radius: 8px;
+}
+
+.light-theme .edge-menu.drag-over {
+  background: rgba(0, 0, 0, 0.03) !important;
 }
 
 .edge-menu-item-wrapper {
